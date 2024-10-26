@@ -2,9 +2,9 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 
+	"github.com/zni/fslib/internal/utilities"
 	fat32 "github.com/zni/fslib/pkg/fat32"
 )
 
@@ -16,20 +16,17 @@ func main() {
 	}
 
 	if *disk == "" {
-		flagset.Usage()
-		os.Exit(1)
+		utilities.DisplayUsage(flagset)
 	}
 
 	fs, err := fat32.Load(*disk)
 	if err != nil {
-		os.Stderr.WriteString(fmt.Sprintf("error: %v\n", err))
-		os.Exit(1)
+		utilities.HandleError(err)
 	}
 
 	fs.PrintInfo()
 
 	if err := fs.Close(); err != nil {
-		os.Stderr.WriteString(fmt.Sprintf("error: %v\n", err))
-		os.Exit(1)
+		utilities.HandleError(err)
 	}
 }
