@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	flagset := flag.NewFlagSet("disk", flag.ExitOnError)
+	flagset := flag.NewFlagSet("inspector", flag.ExitOnError)
 	disk := flagset.String("disk", "", "the disk to inspect")
 	if err := flagset.Parse(os.Args[1:]); err != nil {
 		os.Exit(1)
