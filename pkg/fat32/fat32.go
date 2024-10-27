@@ -60,6 +60,7 @@ type File struct {
 	_dir_loc  int64
 	LDIREntry []*LDIR
 	DIREntry  *DIR
+	fat32     *FAT32
 }
 
 type FileSystem interface {
@@ -69,6 +70,7 @@ type FileSystem interface {
 }
 
 type FSFile interface {
+	Read()
 	PrintInfo()
 }
 
@@ -326,7 +328,7 @@ func getFile(fs *FAT32) (*File, error) {
 		name = strings.Trim(string(dir_entry.name), " ")
 	}
 
-	return &File{name, nil, ldir_loc, dir_loc, ldirs, dir_entry}, nil
+	return &File{name, nil, ldir_loc, dir_loc, ldirs, dir_entry, fs}, nil
 }
 
 /*
@@ -714,7 +716,7 @@ func syncFileSystemData(fs *FAT32) error {
 	return nil
 }
 
-func (fs FAT32) CreateDir(dir_path string) (*File, error) {
+func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	// Get the base path before our new directory.
 	dir_name := path.Base(dir_path)
 	if (dir_name == "/") || (dir_name == ".") {
@@ -744,13 +746,13 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 		uint(base_dir.DIREntry.cluster_lo),
 		uint(base_dir.DIREntry.cluster_hi),
 	)
-	cluster_bytes := lookupClusterBytes(&fs, base_dir_cluster)
-	free_cluster, err := getNextFreeCluster(&fs)
+	cluster_bytes := lookupClusterBytes(fs, base_dir_cluster)
+	free_cluster, err := getNextFreeCluster(fs)
 	if err != nil {
 		return nil, err
 	}
-	free_cluster_bytes := lookupClusterBytes(&fs, uint(free_cluster))
-	next_free_bytes, err := getNextFreeDIR(&fs, cluster_bytes)
+	free_cluster_bytes := lookupClusterBytes(fs, uint(free_cluster))
+	next_free_bytes, err := getNextFreeDIR(fs, cluster_bytes)
 	if err != nil {
 		return nil, err
 	}
@@ -758,17 +760,17 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 	dir_entry.cluster_hi = uint16((free_cluster & 0xFFFF0000) >> 16)
 
 	// Write out the LDIR and DIR entries for the directory.
-	ldir_end_location, err := writeLDIRs(&fs, ldirs, next_free_bytes)
+	ldir_end_location, err := writeLDIRs(fs, ldirs, next_free_bytes)
 	if err != nil {
 		return nil, err
 	}
-	_, err = writeDIR(&fs, dir_entry, ldir_end_location)
+	_, err = writeDIR(fs, dir_entry, ldir_end_location)
 	if err != nil {
 		return nil, err
 	}
 
 	// Zero the cluster where we'll store the contents of the new directory.
-	if err := zeroCluster(&fs, free_cluster_bytes); err != nil {
+	if err := zeroCluster(fs, free_cluster_bytes); err != nil {
 		return nil, err
 	}
 
@@ -784,7 +786,7 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 		dir_entry.cluster_lo,
 		0,
 	}
-	dot_dir_end_loc, err := writeDIR(&fs, &dot_dir, free_cluster_bytes)
+	dot_dir_end_loc, err := writeDIR(fs, &dot_dir, free_cluster_bytes)
 	if err != nil {
 		return nil, err
 	}
@@ -799,15 +801,15 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 		base_dir.DIREntry.cluster_lo,
 		0,
 	}
-	if _, err = writeDIR(&fs, &dotdot_dir, dot_dir_end_loc); err != nil {
+	if _, err = writeDIR(fs, &dotdot_dir, dot_dir_end_loc); err != nil {
 		return nil, err
 	}
 
 	// Mark the cluster with the '.' and '..' entries as end of cluster.
-	markEOC(&fs, uint(free_cluster))
+	markEOC(fs, uint(free_cluster))
 
 	// Update the FSInfo with the next free cluster and new free cluster count.
-	next_free_cluster, err := getNextFreeCluster(&fs)
+	next_free_cluster, err := getNextFreeCluster(fs)
 	if err != nil {
 		return nil, err
 	}
@@ -815,12 +817,12 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 	fs.FSInfo.free_count = fs.FSInfo.free_count - 1
 
 	// Write out the updated FSInfo and FATs.
-	if err := syncFileSystemData(&fs); err != nil {
+	if err := syncFileSystemData(fs); err != nil {
 		return nil, err
 	}
 
 	// Return a File representation of the new directory.
-	return &File{dir_name, nil, next_free_bytes, ldir_end_location, ldirs, dir_entry}, nil
+	return &File{dir_name, nil, next_free_bytes, ldir_end_location, ldirs, dir_entry, fs}, nil
 }
 
 func (fs *FAT32) Close() error {
@@ -831,7 +833,7 @@ func (fs *FAT32) Close() error {
 	}
 }
 
-func (fs FAT32) PrintInfo() {
+func (fs *FAT32) PrintInfo() {
 	fmt.Printf("+---------------------+\n")
 	fmt.Printf("|  VOLUME DEBUG INFO  |\n")
 	fmt.Printf("+---------------------+\n")
@@ -864,4 +866,64 @@ func (file *File) PrintInfo() {
 		),
 	)
 	fmt.Println("")
+}
+
+func (file *File) Read() (bytes_read int, err error) {
+	if (file.DIREntry.attr & attr_directory) == attr_directory {
+		return 0, errors.New("file must not be a directory")
+	}
+
+	file_cluster := utilities.DirClusterToUint(
+		uint(file.DIREntry.cluster_lo),
+		uint(file.DIREntry.cluster_hi),
+	)
+	file_loc_bytes := lookupClusterBytes(file.fat32, file_cluster)
+
+	// Seek to first cluster for the file.
+	file.fat32.file.Seek(file_loc_bytes, io.SeekStart)
+
+	// Calculate sizes.
+	var file_size uint = uint(file.DIREntry.filesize)
+	var cluster_size uint = uint(file.fat32.BPB.bytes_per_sector) * uint(file.fat32.BPB.sectors_per_cluster)
+
+	// Set file_size equal to cluster size so we read once if
+	// file_size is less than cluster size.
+	var contents []uint8
+	if file_size < cluster_size {
+		contents = make([]uint8, file_size)
+		file_size = cluster_size
+	} else {
+		contents = make([]uint8, cluster_size)
+	}
+
+	// Read the complete contents of the file.
+	var total_bytes_read int = 0
+	var EOC uint32 = file.fat32.FAT[1]
+	var next_cluster uint32 = file.fat32.FAT[file_cluster]
+	for ; file_size >= cluster_size; file_size -= cluster_size {
+		bytes_read, err := file.fat32.file.Read(contents)
+		if err != nil {
+			total_bytes_read += bytes_read
+			return total_bytes_read, fmt.Errorf("failed to read contents after %d bytes: %w", total_bytes_read, err)
+		} else {
+			total_bytes_read += bytes_read
+		}
+
+		// We hit EOF, bail out.
+		if bytes_read == 0 {
+			return total_bytes_read, errors.New("encountered unexpected end of file")
+		}
+
+		// Is the next cluster the end of chain?
+		// If not, calculate the next cluster in the chain.
+		if next_cluster != EOC {
+			next_cluster = file.fat32.FAT[next_cluster]
+			file_loc_bytes = lookupClusterBytes(file.fat32, uint(next_cluster))
+			file.fat32.file.Seek(file_loc_bytes, io.SeekStart)
+		}
+
+		file.Content = slices.Concat(file.Content, contents)
+	}
+
+	return total_bytes_read, nil
 }
