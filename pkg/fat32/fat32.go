@@ -25,6 +25,7 @@ type File struct {
 
 type FileSystem interface {
 	ReadFile(path string) (*File, error)
+	CreateFile(path string, b []byte) (*File, error)
 	CreateDir(path string) (*File, error)
 	PrintInfo()
 }
@@ -51,36 +52,36 @@ Load a volume's information into memory.
 func Load(path string) (*FAT32, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0644)
 	if err != nil {
-		return nil, errors.New("could not open volume")
+		return nil, &FSError{"Load", path, err}
 	}
 
 	bpb, err := readBPB(file)
 	if err != nil {
-		return nil, errors.New("failed to read BPB")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read BPB: %w", err)}
 	}
 
 	fsinfo, err := readFSInfo(file)
 	if err != nil {
-		return nil, errors.New("failed to read FSInfo")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read FSInfo: %w", err)}
 	}
 
 	_, err = file.Seek(int64(bpb.bytes_per_sector*backup_bpb_sector), io.SeekStart)
 	if err != nil {
-		return nil, errors.New("failed to seek to backup volume information")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read backup BPB: %w", err)}
 	}
 
 	backup_bpb, err := readBPB(file)
 	if err != nil {
-		return nil, errors.New("failed to read backup BPB")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read backup BPB: %w", err)}
 	}
 	backup_fsinfo, err := readFSInfo(file)
 	if err != nil {
-		return nil, errors.New("failed to read backup FSInfo")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read backup FSInfo: %w", err)}
 	}
 
 	_, err = file.Seek(int64(bpb.reserved_sector_count)*int64(bpb.bytes_per_sector), io.SeekStart)
 	if err != nil {
-		return nil, errors.New("failed to seek to FAT")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read FAT: %w", err)}
 	}
 
 	data_sectors := bpb.total_sectors_32 - (uint32(bpb.reserved_sector_count) + uint32(bpb.number_of_fats)*bpb.fat_size_32)
@@ -90,7 +91,7 @@ func Load(path string) (*FAT32, error) {
 		max_clusters,
 	)
 	if err != nil {
-		return nil, errors.New("failed to read FAT")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read FAT: %w", err)}
 	}
 
 	backup_fat, err := readFAT(
@@ -98,7 +99,7 @@ func Load(path string) (*FAT32, error) {
 		max_clusters,
 	)
 	if err != nil {
-		return nil, errors.New("failed to read backup FAT")
+		return nil, &FSError{"Load", path, fmt.Errorf("failed to read backup FAT: %w", err)}
 	}
 
 	return &FAT32{bpb, fsinfo, backup_bpb, backup_fsinfo, fat, backup_fat, file}, nil
@@ -174,20 +175,20 @@ func getFile(fs *FAT32) (*File, error) {
 /*
 Read a file from the volume given by the path.
 */
-func (fs FAT32) ReadFile(file_path string) (*File, error) {
+func (fs *FAT32) ReadFile(file_path string) (*File, error) {
 	// Start in the root cluster and calculate the cluster boundary.
 	current_cluster := fs.BPB.root_cluster
-	_, err := fs.file.Seek(int64(lookupClusterBytes(&fs, current_cluster)), io.SeekStart)
+	_, err := fs.file.Seek(int64(lookupClusterBytes(fs, current_cluster)), io.SeekStart)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"ReadFile", file_path, fmt.Errorf("failed to seek to cluster: %w", err)}
 	}
-	cluster_boundary := lookupClusterBytes(&fs, current_cluster+1)
+	cluster_boundary := lookupClusterBytes(fs, current_cluster+1)
 
 	// Split the path on forward slashes.
 	// If we only have one element '/', which becomes "", then return.
 	segmented_path := strings.Split(file_path, "/")
 	if segmented_path[0] == "" && len(segmented_path) == 1 {
-		return nil, errors.New("no file specified")
+		return nil, &FSError{"ReadFile", file_path, fmt.Errorf("no file specified")}
 	}
 
 	var file *File
@@ -201,15 +202,15 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 		// Get our current position again for the for loop below.
 		current_location, err := fs.file.Seek(0, io.SeekCurrent)
 		if err != nil {
-			return nil, err
+			return nil, &FSError{"ReadFile", file_path, fmt.Errorf("failed to get cursor location: %w", err)}
 		}
 
 		// While we're not at the cluster boundary and we haven't found
 		// the file yet, keep looking.
 		for current_location < int64(cluster_boundary) {
-			file, err = getFile(&fs)
+			file, err = getFile(fs)
 			if err != nil {
-				return nil, err
+				return nil, &FSError{"ReadFile", file_path, fmt.Errorf("failed to get file: %w", err)}
 			}
 
 			// If we have a match, break out so we can analyze it.
@@ -219,7 +220,7 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 
 			current_location, err = fs.file.Seek(0, io.SeekCurrent)
 			if err != nil {
-				return nil, err
+				return nil, &FSError{"ReadFile", file_path, fmt.Errorf("failed to get cursor location: %w", err)}
 			}
 		}
 
@@ -229,11 +230,11 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 				uint(file.DIREntry.cluster_lo),
 				uint(file.DIREntry.cluster_hi),
 			)
-			_, err = fs.file.Seek(int64(lookupClusterBytes(&fs, cluster)), io.SeekStart)
+			_, err = fs.file.Seek(int64(lookupClusterBytes(fs, cluster)), io.SeekStart)
 			if err != nil {
-				return nil, err
+				return nil, &FSError{"ReadFile", file_path, fmt.Errorf("failed to seek to cluster: %w", err)}
 			}
-			cluster_boundary = lookupClusterBytes(&fs, cluster+1)
+			cluster_boundary = lookupClusterBytes(fs, cluster+1)
 		}
 
 		// If we're at the last part of the path, we found the file.
@@ -242,7 +243,7 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 		}
 	}
 
-	return nil, errors.New("file not found")
+	return nil, &FSError{"ReadFile", file_path, fmt.Errorf("file not found")}
 }
 
 /*
@@ -344,29 +345,29 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	// Get the base path before our new directory.
 	dir_name := path.Base(dir_path)
 	if (dir_name == "/") || (dir_name == ".") {
-		return nil, errors.New("invalid path")
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("invalid directory path")}
 	}
 
 	// Check if this filename already exists.
 	if _, err := fs.ReadFile(dir_path); err == nil {
-		return nil, errors.New("file name already exists")
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("file name already exists")}
 	}
 
 	// Read in the information for the containing directory.
 	base_dir, err := fs.ReadFile(path.Dir(dir_path))
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to read parent directory: %w", err)}
 	}
 
 	// Create our DIR and LDIR entries.
 	dir_entry, err := createDIR(dir_name, attr_directory)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create DIR: %w", err)}
 	}
 	chksum := computeShortChecksum(dir_entry)
 	ldirs, err := createLDIRs(dir_name, chksum)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create LDIRs: %w", err)}
 	}
 
 	// Compute the next free cluster and free space for our
@@ -378,12 +379,12 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	cluster_bytes := lookupClusterBytes(fs, base_dir_cluster)
 	free_cluster, err := getNextFreeCluster(fs)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to get cluster: %w", err)}
 	}
 	free_cluster_bytes := lookupClusterBytes(fs, free_cluster)
 	next_free_bytes, err := getNextFreeDIR(fs, cluster_bytes)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to get next free DIR: %w", err)}
 	}
 	dir_entry.cluster_lo = uint16(free_cluster & 0x0000FFFF)
 	dir_entry.cluster_hi = uint16((free_cluster & 0xFFFF0000) >> 16)
@@ -391,34 +392,34 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	// Write out the LDIR and DIR entries for the directory.
 	ldir_end_location, err := writeLDIRs(fs, ldirs, next_free_bytes)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write LDIR entries: %w", err)}
 	}
 	_, err = writeDIR(fs, dir_entry, ldir_end_location)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write DIR entry: %w", err)}
 	}
 
 	// Zero the cluster where we'll store the contents of the new directory.
 	if err := zeroCluster(fs, free_cluster_bytes); err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to zero cluster: %w", err)}
 	}
 
 	// Create and write out the '.' and '..' entries.
 	dot_dir, err := createSystemDIR(".", attr_directory|attr_system)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create '.' entry: %w", err)}
 	}
 	dot_dir_end_loc, err := writeDIR(fs, dot_dir, free_cluster_bytes)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write '.' entry: %w", err)}
 	}
 
 	dotdot_dir, err := createSystemDIR("..", attr_directory|attr_system)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create '..' entry: %w", err)}
 	}
 	if _, err = writeDIR(fs, dotdot_dir, dot_dir_end_loc); err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write '..' entry: %w", err)}
 	}
 
 	// Mark the cluster with the '.' and '..' entries as end of cluster.
@@ -427,14 +428,14 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	// Update the FSInfo with the next free cluster and new free cluster count.
 	next_free_cluster, err := getNextFreeCluster(fs)
 	if err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to get cluster for FSInfo: %w", err)}
 	}
 	fs.FSInfo.next_free = next_free_cluster
 	fs.FSInfo.free_count = fs.FSInfo.free_count - 1
 
 	// Write out the updated FSInfo and FATs.
 	if err := syncFileSystemData(fs); err != nil {
-		return nil, err
+		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to sync volume info: %w", err)}
 	}
 
 	// Return a File representation of the new directory.
@@ -446,7 +447,7 @@ Close the file that represents the FAT32 volume.
 */
 func (fs *FAT32) Close() error {
 	if err := fs.file.Close(); err != nil {
-		return err
+		return &FSError{"Close", fs.file.Name(), fmt.Errorf("failed to close volume: %w", err)}
 	} else {
 		return nil
 	}
@@ -507,7 +508,7 @@ Read a portion of a file's contents from the volume into the buffer provided.
 */
 func (file *File) Read(b []byte) (n int, err error) {
 	if (file.DIREntry.attr & attr_directory) == attr_directory {
-		return 0, errors.New("file must not be a directory")
+		return 0, &FileError{"Read", file.Name, fmt.Errorf("file must not be a directory")}
 	}
 
 	var file_size int = int(file.DIREntry.filesize)
@@ -531,7 +532,9 @@ func (file *File) Read(b []byte) (n int, err error) {
 	file_loc_bytes := lookupClusterBytes(file.fat32, file_cluster)
 
 	// Seek to first cluster for the file.
-	file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
+	if _, err = file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart); err != nil {
+		return 0, &FileError{"Read", file.Name, fmt.Errorf("failed to seek to file cluster: %w", err)}
+	}
 
 	var total_bytes_read int = 0
 	var EOC uint32 = file.fat32.FAT[1]
@@ -542,14 +545,14 @@ func (file *File) Read(b []byte) (n int, err error) {
 		bytes_read, err = file.fat32.file.Read(b[total_bytes_read:(total_bytes_read + read_size)])
 		if err != nil {
 			total_bytes_read += bytes_read
-			return total_bytes_read, fmt.Errorf("failed to read contents after %d bytes: %w", total_bytes_read, err)
+			return total_bytes_read, &FileError{"Read", file.Name, fmt.Errorf("failed to read contents after %d bytes: %w", total_bytes_read, err)}
 		} else {
 			total_bytes_read += bytes_read
 		}
 
 		// We hit EOF, bail out.
 		if bytes_read == 0 {
-			return total_bytes_read, errors.New("encountered unexpected end of file")
+			return total_bytes_read, &FileError{"Read", file.Name, fmt.Errorf("encountered unexpected end of file")}
 		}
 
 		// Is the next cluster the end of chain?
@@ -557,7 +560,9 @@ func (file *File) Read(b []byte) (n int, err error) {
 		next_cluster = file.fat32.FAT[next_cluster]
 		if next_cluster != EOC {
 			file_loc_bytes = lookupClusterBytes(file.fat32, next_cluster)
-			file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
+			if _, err = file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart); err != nil {
+				return 0, &FileError{"Read", file.Name, fmt.Errorf("failed to seek to next cluster: %w", err)}
+			}
 		}
 
 		bytes_to_read -= bytes_read
