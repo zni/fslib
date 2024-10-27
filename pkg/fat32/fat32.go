@@ -84,6 +84,9 @@ type FAT32 struct {
 	file         *os.File
 }
 
+/*
+Load a volume's information into memory.
+*/
 func Load(path string) (*FAT32, error) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0644)
 	if err != nil {
@@ -140,6 +143,9 @@ func Load(path string) (*FAT32, error) {
 	return &FAT32{bpb, fsinfo, backup_bpb, backup_fsinfo, fat, backup_fat, file}, nil
 }
 
+/*
+Look up the location in bytes of the given cluster.
+*/
 func lookupClusterBytes(fs *FAT32, cluster uint32) uint32 {
 	var reserved_bytes int64 = int64(fs.BPB.reserved_sector_count * fs.BPB.bytes_per_sector)
 	var fat_bytes int64 = int64(2 * (fs.BPB.fat_size_32 * uint32(fs.BPB.bytes_per_sector)))
@@ -152,6 +158,9 @@ func lookupClusterBytes(fs *FAT32, cluster uint32) uint32 {
 	return uint32(data_sector + cluster_sector)
 }
 
+/*
+Read a single LDIR entry from the volume.
+*/
 func readLDIR(fs *FAT32) (*LDIR, error) {
 	var name_part LDIR
 	var byte_ []uint8 = make([]uint8, 1)
@@ -208,6 +217,9 @@ func readLDIR(fs *FAT32) (*LDIR, error) {
 	return &name_part, nil
 }
 
+/*
+Join an array of LDIRs into a string containing the filename.
+*/
 func joinLDIRs(ldirs []*LDIR) string {
 	slices.Reverse(ldirs)
 	var name []byte = make([]byte, 0, 255)
@@ -232,6 +244,9 @@ func joinLDIRs(ldirs []*LDIR) string {
 	return filename
 }
 
+/*
+Read a single DIR entry from the volume.
+*/
 func readDIR(fs *FAT32) (*DIR, error) {
 	var byte_ []uint8 = make([]uint8, 1)
 	var short_ []uint8 = make([]uint8, 2)
@@ -282,6 +297,9 @@ func readDIR(fs *FAT32) (*DIR, error) {
 	return &dir_entry, nil
 }
 
+/*
+Read a file's complete LDIR and DIR entries from the volume.
+*/
 func getFile(fs *FAT32) (*File, error) {
 	var ldirs []*LDIR
 
@@ -332,7 +350,7 @@ func getFile(fs *FAT32) (*File, error) {
 }
 
 /*
-Read a file from the filesystem given by the path.
+Read a file from the volume given by the path.
 */
 func (fs FAT32) ReadFile(file_path string) (*File, error) {
 	// Start in the root cluster and calculate the cluster boundary.
@@ -405,6 +423,9 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 	return nil, errors.New("file not found")
 }
 
+/*
+Does the rune c satisfy what FAT32 considers a valid character in a file name?
+*/
 func validCharacter(c rune) bool {
 	var forbidden_characters []rune = []rune{
 		0x22, 0x2A, 0x2B, 0x2C, 0x2E, 0x2F, 0x3A,
@@ -423,6 +444,9 @@ func validCharacter(c rune) bool {
 	return true
 }
 
+/*
+Create the truncated DOS-style name for a given file.
+*/
 func createDIRName(name string, system bool) ([]uint8, error) {
 	uppercase_name := strings.ToUpper(name)
 	uppercase_name = strings.ReplaceAll(uppercase_name, " ", "")
@@ -449,6 +473,9 @@ func createDIRName(name string, system bool) ([]uint8, error) {
 	return dir_format_name, nil
 }
 
+/*
+Generate the write time for the file being created.
+*/
 func createWriteTime() (uint16, uint16) {
 	current_time := time.Now().UTC()
 	seconds := 0
@@ -464,6 +491,9 @@ func createWriteTime() (uint16, uint16) {
 	return write_time, write_date
 }
 
+/*
+Create a DIR entry for the given name.
+*/
 func createDIR(name string) (*DIR, error) {
 	dir_format_name, err := createDIRName(name, false)
 	if err != nil {
@@ -474,6 +504,9 @@ func createDIR(name string) (*DIR, error) {
 	return &DIR{dir_format_name, attr_directory, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
 }
 
+/*
+Compute the checksum over the DIR entry used to validate live LDIR entries.
+*/
 func computeShortChecksum(dir *DIR) uint8 {
 	var chksum uint8 = 0
 	j := 0
@@ -489,6 +522,9 @@ func computeShortChecksum(dir *DIR) uint8 {
 	return chksum
 }
 
+/*
+Given a name and checksum, generate the necessary LDIR entries to contain it.
+*/
 func createLDIRs(name string, chksum uint8) ([]*LDIR, error) {
 	if len(name) > 255 {
 		return nil, errors.New("name longer than 255 characters")
@@ -550,6 +586,9 @@ func createLDIRs(name string, chksum uint8) ([]*LDIR, error) {
 	return ldirs, nil
 }
 
+/*
+Get the next free cluster from the FAT not marked EOC.
+*/
 func getNextFreeCluster(fs *FAT32) (uint32, error) {
 	for i := 2; i < len(fs.FAT); i++ {
 		if fs.FAT[i] == 0 {
@@ -560,6 +599,9 @@ func getNextFreeCluster(fs *FAT32) (uint32, error) {
 	return 0, errors.New("no free clusters")
 }
 
+/*
+Get the location for the next free DIR entry in a cluster.
+*/
 func getNextFreeDIR(fs *FAT32, cluster uint32) (int64, error) {
 	current_location, err := fs.file.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -586,6 +628,9 @@ func getNextFreeDIR(fs *FAT32, cluster uint32) (int64, error) {
 	return -1, errors.New("no free space in cluster")
 }
 
+/*
+Write out an array of LDIRs to the location loc on disk.
+*/
 func writeLDIRs(fs *FAT32, ldirs []*LDIR, loc int64) (uint32, error) {
 	if _, err := fs.file.Seek(loc, io.SeekStart); err != nil {
 		return 0, err
@@ -625,6 +670,9 @@ func writeLDIRs(fs *FAT32, ldirs []*LDIR, loc int64) (uint32, error) {
 	return uint32(ldir_end_loc), nil
 }
 
+/*
+Write out a DIR entry dir to the location loc on disk.
+*/
 func writeDIR(fs *FAT32, dir *DIR, loc uint32) (uint32, error) {
 	if _, err := fs.file.Seek(int64(loc), io.SeekStart); err != nil {
 		return 0, err
@@ -675,10 +723,16 @@ func writeDIR(fs *FAT32, dir *DIR, loc uint32) (uint32, error) {
 	return uint32(end_loc), nil
 }
 
+/*
+Mark a cluster in the FAT with the EOC value.
+*/
 func markEOC(fs *FAT32, cluster uint) {
 	fs.FAT[cluster] = fs.FAT[1]
 }
 
+/*
+Zero out a cluster for use.
+*/
 func zeroCluster(fs *FAT32, cluster uint32) error {
 	if _, err := fs.file.Seek(int64(cluster), io.SeekStart); err != nil {
 		return err
@@ -692,6 +746,9 @@ func zeroCluster(fs *FAT32, cluster uint32) error {
 	return nil
 }
 
+/*
+Write back out the FSInfo and FAT after a write operation.
+*/
 func syncFileSystemData(fs *FAT32) error {
 	// Jump to FSInfo block
 	if err := seekToFSInfo(fs); err != nil {
@@ -716,6 +773,9 @@ func syncFileSystemData(fs *FAT32) error {
 	return nil
 }
 
+/*
+Create a directory represented by the path.
+*/
 func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	// Get the base path before our new directory.
 	dir_name := path.Base(dir_path)
@@ -825,6 +885,9 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	return &File{dir_name, nil, uint32(next_free_bytes), ldir_end_location, ldirs, dir_entry, fs}, nil
 }
 
+/*
+Close the file that represents the FAT32 volume.
+*/
 func (fs *FAT32) Close() error {
 	if err := fs.file.Close(); err != nil {
 		return err
@@ -833,6 +896,9 @@ func (fs *FAT32) Close() error {
 	}
 }
 
+/*
+Print volume debug information.
+*/
 func (fs *FAT32) PrintInfo() {
 	fmt.Printf("+---------------------+\n")
 	fmt.Printf("|  VOLUME DEBUG INFO  |\n")
@@ -847,6 +913,9 @@ func (fs *FAT32) PrintInfo() {
 	fmt.Println("")
 }
 
+/*
+Print file debug information.
+*/
 func (file *File) PrintInfo() {
 	fmt.Printf("+-------------------+\n")
 	fmt.Printf("|  FILE DEBUG INFO  |\n")
@@ -869,6 +938,9 @@ func (file *File) PrintInfo() {
 	fmt.Println("")
 }
 
+/*
+Read a file's complete contents from the volume.
+*/
 func (file *File) Read() (bytes_read int, err error) {
 	if (file.DIREntry.attr & attr_directory) == attr_directory {
 		return 0, errors.New("file must not be a directory")
@@ -925,6 +997,9 @@ func (file *File) Read() (bytes_read int, err error) {
 
 		file.Content = slices.Concat(file.Content, contents)
 
+		// Is the file size larger than a cluster?
+		// If so, contents is cluster sized.
+		// Otherwise, contents is the remaining file size.
 		if file_size > cluster_size {
 			contents = make([]uint8, cluster_size)
 		} else {
