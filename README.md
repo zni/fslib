@@ -67,6 +67,8 @@ $ local/fs.fat32.inspector -disk local/test1.dsk -path /home
 
 ### fs.fat32.mkdir
 
+**DANGER** The least tested of the utilities and most likely to cause mental anguish.
+
 Creates an empty directory in the volume. Preceeding path must exist.
 
 ```
