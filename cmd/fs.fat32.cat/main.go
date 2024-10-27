@@ -41,9 +41,10 @@ func main() {
 	}
 
 	if bytes_read == 0 {
-		os.Stderr.WriteString(fmt.Sprintln("read 0 bytes"))
+		os.Stderr.WriteString(fmt.Sprintln("=> read in 0 bytes"))
 	} else {
-		fmt.Printf("%s\n", file.Content)
+		os.Stderr.WriteString(fmt.Sprintf("=> read in %d bytes\n", bytes_read))
+		fmt.Printf("%s", file.Content)
 	}
 
 	if err := fs.Close(); err != nil {

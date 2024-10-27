@@ -989,8 +989,8 @@ func (file *File) Read() (bytes_read int, err error) {
 
 		// Is the next cluster the end of chain?
 		// If not, calculate the next cluster in the chain.
+		next_cluster = file.fat32.FAT[next_cluster]
 		if next_cluster != EOC {
-			next_cluster = file.fat32.FAT[next_cluster]
 			file_loc_bytes = lookupClusterBytes(file.fat32, next_cluster)
 			file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
 		}
