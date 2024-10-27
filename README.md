@@ -64,3 +64,21 @@ $ local/fs.fat32.inspector -disk local/test1.dsk -path /home
 \ cluster   : 11
 \ file size : 21
 ```
+
+### fs.fat32.mkdir
+
+Creates an empty directory in the volume. Preceeding path must exist.
+
+```
+$ go build -o local ./cmd/fs.fat32.mkdir
+$ local/fs.fat32.mkdir -disk local/test1.dsk -path /misc/b/z
++-------------------+
+|  FILE DEBUG INFO  |
++-------------------+
+\ filename  : z
+\ LDIR loc  : 000f6040
+\ DIR loc   : 000f6060
+\ directory?: true
+\ cluster   : 6
+\ file size : 0
+```
