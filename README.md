@@ -10,6 +10,22 @@ With the above out of the way, how does this stuff work?
 
 Well, you could use the `pkg/fat32` library portion directly, or use one of the debugging CLI tools in `cmd/`.
 
+### pkg/fat32 Library
+
+Most of the useful stuff for public consumption is in `pkg/fat32/fat32.go`.
+
+- `Load`: loads a fat32 volume information into memory and returns a `FAT32` struct.
+
+The `FAT32` struct implements the `FileSystem` interface, which allows you to:
+- `ReadFile`: reads a file's information from the volume and returns a `File` struct.
+- `CreateDir`: creates a directory in the volume and returns a `File` struct representing the new directory.
+- `PrintInfo`: just prints to the terminal debug information about the volume.
+
+The `File` struct implements the `FSFile` interface, which allows you to:
+- `Read`: reads a portion of the file's contents into the provided buffer.
+- `ReadAll`: reads all of the file's contents into the `File.Content` struct member.
+- `PrintInfo`: just prints to the terminal debug information about the file.
+
 ### Debugging Tools
 
 ### fs.fat32.cat
