@@ -70,7 +70,8 @@ type FileSystem interface {
 }
 
 type FSFile interface {
-	Read()
+	Read(b []byte)
+	ReadAll()
 	PrintInfo()
 }
 
@@ -939,11 +940,33 @@ func (file *File) PrintInfo() {
 }
 
 /*
-Read a file's complete contents from the volume.
+Read a file's complete contents from the volume into the File.Content struct member.
 */
-func (file *File) Read() (bytes_read int, err error) {
+func (file *File) ReadAll() (bytes_read int, err error) {
+	file.Content = make([]uint8, file.DIREntry.filesize)
+	return file.Read(file.Content)
+}
+
+/*
+Read a portion of a file's contents from the volume into the buffer provided.
+*/
+func (file *File) Read(b []byte) (n int, err error) {
 	if (file.DIREntry.attr & attr_directory) == attr_directory {
 		return 0, errors.New("file must not be a directory")
+	}
+
+	var file_size int = int(file.DIREntry.filesize)
+	var cluster_size int = int(file.fat32.BPB.bytes_per_sector) * int(file.fat32.BPB.sectors_per_cluster)
+	var bytes_to_read int = len(b)
+	if bytes_to_read > file_size {
+		bytes_to_read = file_size
+	}
+
+	var read_size int
+	if bytes_to_read > cluster_size {
+		read_size = cluster_size
+	} else {
+		read_size = bytes_to_read
 	}
 
 	file_cluster := utilities.DirClusterToUint(
@@ -955,26 +978,13 @@ func (file *File) Read() (bytes_read int, err error) {
 	// Seek to first cluster for the file.
 	file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
 
-	// Calculate sizes.
-	var file_size int = int(file.DIREntry.filesize)
-	var cluster_size int = int(file.fat32.BPB.bytes_per_sector) * int(file.fat32.BPB.sectors_per_cluster)
-
-	// Set file_size equal to cluster size so we read once if
-	// file_size is less than cluster size.
-	var contents []uint8
-	if file_size < cluster_size {
-		contents = make([]uint8, file_size)
-	} else {
-		contents = make([]uint8, cluster_size)
-	}
-
 	var total_bytes_read int = 0
 	var EOC uint32 = file.fat32.FAT[1]
 	var next_cluster uint32 = file_cluster
+	var bytes_read int = 0
 
-	// Read the contents of the file.
-	for ; file_size >= 0; file_size -= cluster_size {
-		bytes_read, err := file.fat32.file.Read(contents)
+	for bytes_to_read > 0 {
+		bytes_read, err = file.fat32.file.Read(b[total_bytes_read:(total_bytes_read + read_size)])
 		if err != nil {
 			total_bytes_read += bytes_read
 			return total_bytes_read, fmt.Errorf("failed to read contents after %d bytes: %w", total_bytes_read, err)
@@ -995,16 +1005,17 @@ func (file *File) Read() (bytes_read int, err error) {
 			file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
 		}
 
-		file.Content = slices.Concat(file.Content, contents)
+		bytes_to_read -= bytes_read
 
 		// Is the file size larger than a cluster?
 		// If so, contents is cluster sized.
 		// Otherwise, contents is the remaining file size.
-		if file_size > cluster_size {
-			contents = make([]uint8, cluster_size)
+		if bytes_to_read > cluster_size {
+			read_size = cluster_size
 		} else {
-			contents = make([]uint8, file_size)
+			read_size = bytes_to_read
 		}
+
 	}
 
 	return total_bytes_read, nil
