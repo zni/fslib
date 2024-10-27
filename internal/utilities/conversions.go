@@ -22,8 +22,8 @@ func IntToBytes(s uint32) []uint8 {
 	}
 }
 
-func DirClusterToUint(cluster_lo uint, cluster_hi uint) uint {
-	return (cluster_hi << 16) | cluster_lo
+func DirClusterToUint(cluster_lo uint, cluster_hi uint) uint32 {
+	return uint32((cluster_hi << 16) | cluster_lo)
 }
 
 func YearToFATYear(year int) int {

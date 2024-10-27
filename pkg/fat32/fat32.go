@@ -56,8 +56,8 @@ type DIR struct {
 type File struct {
 	Name      string
 	Content   []uint8
-	_ldir_loc int64
-	_dir_loc  int64
+	_ldir_loc uint32
+	_dir_loc  uint32
 	LDIREntry []*LDIR
 	DIREntry  *DIR
 	fat32     *FAT32
@@ -140,16 +140,16 @@ func Load(path string) (*FAT32, error) {
 	return &FAT32{bpb, fsinfo, backup_bpb, backup_fsinfo, fat, backup_fat, file}, nil
 }
 
-func lookupClusterBytes(fs *FAT32, cluster uint) int64 {
+func lookupClusterBytes(fs *FAT32, cluster uint32) uint32 {
 	var reserved_bytes int64 = int64(fs.BPB.reserved_sector_count * fs.BPB.bytes_per_sector)
 	var fat_bytes int64 = int64(2 * (fs.BPB.fat_size_32 * uint32(fs.BPB.bytes_per_sector)))
 	data_sector := reserved_bytes + fat_bytes
 
-	var current_cluster int64 = int64(cluster - uint(fs.BPB.root_cluster))
+	var current_cluster int64 = int64(cluster - fs.BPB.root_cluster)
 	var cluster_size int64 = int64(fs.BPB.bytes_per_sector * uint16(fs.BPB.sectors_per_cluster))
 	cluster_sector := current_cluster * cluster_size
 
-	return (data_sector + cluster_sector)
+	return uint32(data_sector + cluster_sector)
 }
 
 func readLDIR(fs *FAT32) (*LDIR, error) {
@@ -328,7 +328,7 @@ func getFile(fs *FAT32) (*File, error) {
 		name = strings.Trim(string(dir_entry.name), " ")
 	}
 
-	return &File{name, nil, ldir_loc, dir_loc, ldirs, dir_entry, fs}, nil
+	return &File{name, nil, uint32(ldir_loc), uint32(dir_loc), ldirs, dir_entry, fs}, nil
 }
 
 /*
@@ -336,8 +336,8 @@ Read a file from the filesystem given by the path.
 */
 func (fs FAT32) ReadFile(file_path string) (*File, error) {
 	// Start in the root cluster and calculate the cluster boundary.
-	current_cluster := uint(fs.BPB.root_cluster)
-	_, err := fs.file.Seek(lookupClusterBytes(&fs, current_cluster), io.SeekStart)
+	current_cluster := fs.BPB.root_cluster
+	_, err := fs.file.Seek(int64(lookupClusterBytes(&fs, current_cluster)), io.SeekStart)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +366,7 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 
 		// While we're not at the cluster boundary and we haven't found
 		// the file yet, keep looking.
-		for current_location < cluster_boundary {
+		for current_location < int64(cluster_boundary) {
 			file, err = getFile(&fs)
 			if err != nil {
 				return nil, err
@@ -389,7 +389,7 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 				uint(file.DIREntry.cluster_lo),
 				uint(file.DIREntry.cluster_hi),
 			)
-			_, err = fs.file.Seek(lookupClusterBytes(&fs, cluster), io.SeekStart)
+			_, err = fs.file.Seek(int64(lookupClusterBytes(&fs, cluster)), io.SeekStart)
 			if err != nil {
 				return nil, err
 			}
@@ -560,14 +560,14 @@ func getNextFreeCluster(fs *FAT32) (uint32, error) {
 	return 0, errors.New("no free clusters")
 }
 
-func getNextFreeDIR(fs *FAT32, cluster int64) (int64, error) {
+func getNextFreeDIR(fs *FAT32, cluster uint32) (int64, error) {
 	current_location, err := fs.file.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return -1, err
 	}
 
-	cluster_boundary := lookupClusterBytes(fs, uint(cluster+1))
-	for current_location < cluster_boundary {
+	cluster_boundary := lookupClusterBytes(fs, (cluster + 1))
+	for current_location < int64(cluster_boundary) {
 		dir, err := readDIR(fs)
 		if err != nil {
 			return -1, nil
@@ -586,101 +586,101 @@ func getNextFreeDIR(fs *FAT32, cluster int64) (int64, error) {
 	return -1, errors.New("no free space in cluster")
 }
 
-func writeLDIRs(fs *FAT32, ldirs []*LDIR, loc int64) (int64, error) {
+func writeLDIRs(fs *FAT32, ldirs []*LDIR, loc int64) (uint32, error) {
 	if _, err := fs.file.Seek(loc, io.SeekStart); err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	for _, ldir := range ldirs {
 		if _, err := fs.file.Write([]byte{ldir.ordinal}); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write(ldir.name1); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write([]byte{ldir.attr}); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write([]byte{ldir.ltype}); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write([]byte{ldir.chksum}); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write(ldir.name2); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write(utilities.ShortToBytes(ldir.cluster_lo)); err != nil {
-			return -1, err
+			return 0, err
 		}
 		if _, err := fs.file.Write(ldir.name3); err != nil {
-			return -1, err
+			return 0, err
 		}
 	}
 
 	ldir_end_loc, err := fs.file.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
-	return ldir_end_loc, nil
+	return uint32(ldir_end_loc), nil
 }
 
-func writeDIR(fs *FAT32, dir *DIR, loc int64) (int64, error) {
-	if _, err := fs.file.Seek(loc, io.SeekStart); err != nil {
-		return -1, err
+func writeDIR(fs *FAT32, dir *DIR, loc uint32) (uint32, error) {
+	if _, err := fs.file.Seek(int64(loc), io.SeekStart); err != nil {
+		return 0, err
 	}
 
 	if _, err := fs.file.Write(dir.name); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write([]uint8{dir.attr}); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write([]uint8{dir.ntres}); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write([]uint8{dir.crt_time_tenth}); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.crt_time)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.crt_date)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.lst_acc_date)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.cluster_hi)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.wrt_time)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.wrt_date)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.ShortToBytes(dir.cluster_lo)); err != nil {
-		return -1, err
+		return 0, err
 	}
 	if _, err := fs.file.Write(utilities.IntToBytes(dir.filesize)); err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	end_loc, err := fs.file.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
-	return end_loc, nil
+	return uint32(end_loc), nil
 }
 
 func markEOC(fs *FAT32, cluster uint) {
 	fs.FAT[cluster] = fs.FAT[1]
 }
 
-func zeroCluster(fs *FAT32, cluster_loc int64) error {
-	if _, err := fs.file.Seek(cluster_loc, io.SeekStart); err != nil {
+func zeroCluster(fs *FAT32, cluster uint32) error {
+	if _, err := fs.file.Seek(int64(cluster), io.SeekStart); err != nil {
 		return err
 	}
 
@@ -751,7 +751,7 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	free_cluster_bytes := lookupClusterBytes(fs, uint(free_cluster))
+	free_cluster_bytes := lookupClusterBytes(fs, free_cluster)
 	next_free_bytes, err := getNextFreeDIR(fs, cluster_bytes)
 	if err != nil {
 		return nil, err
@@ -822,7 +822,7 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	}
 
 	// Return a File representation of the new directory.
-	return &File{dir_name, nil, next_free_bytes, ldir_end_location, ldirs, dir_entry, fs}, nil
+	return &File{dir_name, nil, uint32(next_free_bytes), ldir_end_location, ldirs, dir_entry, fs}, nil
 }
 
 func (fs *FAT32) Close() error {
@@ -865,6 +865,7 @@ func (file *File) PrintInfo() {
 			uint(file.DIREntry.cluster_hi),
 		),
 	)
+	fmt.Printf("\\ file size : %d\n", file.DIREntry.filesize)
 	fmt.Println("")
 }
 
@@ -880,27 +881,27 @@ func (file *File) Read() (bytes_read int, err error) {
 	file_loc_bytes := lookupClusterBytes(file.fat32, file_cluster)
 
 	// Seek to first cluster for the file.
-	file.fat32.file.Seek(file_loc_bytes, io.SeekStart)
+	file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
 
 	// Calculate sizes.
-	var file_size uint = uint(file.DIREntry.filesize)
-	var cluster_size uint = uint(file.fat32.BPB.bytes_per_sector) * uint(file.fat32.BPB.sectors_per_cluster)
+	var file_size int = int(file.DIREntry.filesize)
+	var cluster_size int = int(file.fat32.BPB.bytes_per_sector) * int(file.fat32.BPB.sectors_per_cluster)
 
 	// Set file_size equal to cluster size so we read once if
 	// file_size is less than cluster size.
 	var contents []uint8
 	if file_size < cluster_size {
 		contents = make([]uint8, file_size)
-		file_size = cluster_size
 	} else {
 		contents = make([]uint8, cluster_size)
 	}
 
-	// Read the complete contents of the file.
 	var total_bytes_read int = 0
 	var EOC uint32 = file.fat32.FAT[1]
-	var next_cluster uint32 = file.fat32.FAT[file_cluster]
-	for ; file_size >= cluster_size; file_size -= cluster_size {
+	var next_cluster uint32 = file_cluster
+
+	// Read the contents of the file.
+	for ; file_size >= 0; file_size -= cluster_size {
 		bytes_read, err := file.fat32.file.Read(contents)
 		if err != nil {
 			total_bytes_read += bytes_read
@@ -918,11 +919,17 @@ func (file *File) Read() (bytes_read int, err error) {
 		// If not, calculate the next cluster in the chain.
 		if next_cluster != EOC {
 			next_cluster = file.fat32.FAT[next_cluster]
-			file_loc_bytes = lookupClusterBytes(file.fat32, uint(next_cluster))
-			file.fat32.file.Seek(file_loc_bytes, io.SeekStart)
+			file_loc_bytes = lookupClusterBytes(file.fat32, next_cluster)
+			file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart)
 		}
 
 		file.Content = slices.Concat(file.Content, contents)
+
+		if file_size > cluster_size {
+			contents = make([]uint8, cluster_size)
+		} else {
+			contents = make([]uint8, file_size)
+		}
 	}
 
 	return total_bytes_read, nil
