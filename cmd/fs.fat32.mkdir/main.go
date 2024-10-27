@@ -29,10 +29,12 @@ func main() {
 		utilities.HandleError(err)
 	}
 
-	_, err = fs.CreateDir(*path)
+	file, err := fs.CreateDir(*path)
 	if err != nil {
 		utilities.HandleError(err)
 	}
+
+	file.PrintInfo()
 
 	if err := fs.Close(); err != nil {
 		utilities.HandleError(err)

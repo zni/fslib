@@ -25,7 +25,7 @@ const attr_directory uint8 = 0x10
 const attr_archive uint8 = 0x20
 
 const last_long_entry uint8 = 0x40
-const long_entry uint8 = (0x01 | 0x02 | 0x04 | 0x08)
+const long_entry uint8 = (attr_readonly | attr_hidden | attr_system | attr_volume_id)
 
 type LDIR struct {
 	ordinal    uint8
@@ -65,6 +65,10 @@ type File struct {
 type FileSystem interface {
 	ReadFile(path string) (*File, error)
 	CreateDir(path string) (*File, error)
+	PrintInfo()
+}
+
+type FSFile interface {
 	PrintInfo()
 }
 
@@ -780,7 +784,8 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 		dir_entry.cluster_lo,
 		0,
 	}
-	if _, err = writeDIR(&fs, &dot_dir, free_cluster_bytes); err != nil {
+	dot_dir_end_loc, err := writeDIR(&fs, &dot_dir, free_cluster_bytes)
+	if err != nil {
 		return nil, err
 	}
 	dotdot_dir_name, _ := createDIRName("..", true)
@@ -794,7 +799,7 @@ func (fs FAT32) CreateDir(dir_path string) (*File, error) {
 		base_dir.DIREntry.cluster_lo,
 		0,
 	}
-	if _, err = writeDIR(&fs, &dotdot_dir, free_cluster_bytes+32); err != nil {
+	if _, err = writeDIR(&fs, &dotdot_dir, dot_dir_end_loc); err != nil {
 		return nil, err
 	}
 
@@ -827,10 +832,36 @@ func (fs *FAT32) Close() error {
 }
 
 func (fs FAT32) PrintInfo() {
-	fmt.Printf("bytes_per_sector: %d\n", fs.BPB.bytes_per_sector)
-	fmt.Printf("sectors_per_cluster: %d\n", fs.BPB.sectors_per_cluster)
-	fmt.Printf("volume_label: %v\n", string(fs.BPB.volume_label))
-	fmt.Printf("file_sys_type: %v\n", string(fs.BPB.file_sys_type))
-	fmt.Printf("next_free: %v\n", fs.FSInfo.next_free)
-	fmt.Printf("free_clusters: %v\n", fs.FSInfo.free_count)
+	fmt.Printf("+---------------------+\n")
+	fmt.Printf("|  VOLUME DEBUG INFO  |\n")
+	fmt.Printf("+---------------------+\n")
+	fmt.Printf("\\ volume_filename: %s\n", path.Base(fs.file.Name()))
+	fmt.Printf("\\ bytes_per_sector: %d\n", fs.BPB.bytes_per_sector)
+	fmt.Printf("\\ sectors_per_cluster: %d\n", fs.BPB.sectors_per_cluster)
+	fmt.Printf("\\ volume_label: %v\n", string(fs.BPB.volume_label))
+	fmt.Printf("\\ file_sys_type: %v\n", string(fs.BPB.file_sys_type))
+	fmt.Printf("\\ free_clusters: %v\n", fs.FSInfo.free_count)
+	fmt.Printf("\\ next_free_cluster: %v\n", fs.FSInfo.next_free)
+	fmt.Println("")
+}
+
+func (file *File) PrintInfo() {
+	fmt.Printf("+-------------------+\n")
+	fmt.Printf("|  FILE DEBUG INFO  |\n")
+	fmt.Printf("+-------------------+\n")
+	fmt.Printf("\\ filename  : %s\n", file.Name)
+	fmt.Printf("\\ LDIR loc  : %08x\n", file._ldir_loc)
+	fmt.Printf("\\ DIR loc   : %08x\n", file._dir_loc)
+	if (file.DIREntry.attr & attr_directory) == attr_directory {
+		fmt.Printf("\\ directory?: true\n")
+	} else {
+		fmt.Printf("\\ directory?: false\n")
+	}
+	fmt.Printf("\\ cluster   : %d\n",
+		utilities.DirClusterToUint(
+			uint(file.DIREntry.cluster_lo),
+			uint(file.DIREntry.cluster_hi),
+		),
+	)
+	fmt.Println("")
 }
