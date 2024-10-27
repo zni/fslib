@@ -2,9 +2,11 @@ package fat32
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zni/fslib/internal/utilities"
 )
@@ -135,16 +137,44 @@ func readDIR(fs *FAT32) (*DIR, error) {
 }
 
 /*
+Generate the write time for the file being created.
+*/
+func createWriteTime() (uint16, uint16) {
+	current_time := time.Now().UTC()
+	seconds := 0
+	minutes := current_time.Minute()
+	hours := current_time.Hour()
+	day := current_time.Day()
+	month := int(current_time.Month())
+	year := utilities.YearToFATYear(current_time.Year())
+
+	var write_time uint16 = uint16((hours << 9) | (minutes << 5) | seconds)
+	var write_date uint16 = uint16((year << 9) | (month << 5) | day)
+
+	return write_time, write_date
+}
+
+/*
 Create a DIR entry for the given name.
 */
-func createDIR(name string) (*DIR, error) {
+func createDIR(name string, attrs uint8) (*DIR, error) {
 	dir_format_name, err := createDIRName(name, false)
 	if err != nil {
 		return nil, err
 	}
 
 	write_time, write_date := createWriteTime()
-	return &DIR{dir_format_name, attr_directory, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
+	return &DIR{dir_format_name, attrs, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
+}
+
+func createSystemDIR(name string, attrs uint8) (*DIR, error) {
+	dir_format_name, err := createDIRName(name, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create system DIR: %w", err)
+	}
+
+	write_time, write_date := createWriteTime()
+	return &DIR{dir_format_name, attrs, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
 }
 
 /*

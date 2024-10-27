@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/zni/fslib/internal/utilities"
 )
@@ -247,24 +246,6 @@ func (fs FAT32) ReadFile(file_path string) (*File, error) {
 }
 
 /*
-Generate the write time for the file being created.
-*/
-func createWriteTime() (uint16, uint16) {
-	current_time := time.Now().UTC()
-	seconds := 0
-	minutes := current_time.Minute()
-	hours := current_time.Hour()
-	day := current_time.Day()
-	month := int(current_time.Month())
-	year := utilities.YearToFATYear(current_time.Year())
-
-	var write_time uint16 = uint16((hours << 9) | (minutes << 5) | seconds)
-	var write_date uint16 = uint16((year << 9) | (month << 5) | day)
-
-	return write_time, write_date
-}
-
-/*
 Get the next free cluster from the FAT not marked EOC.
 */
 func getNextFreeCluster(fs *FAT32) (uint32, error) {
@@ -378,7 +359,7 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	}
 
 	// Create our DIR and LDIR entries.
-	dir_entry, err := createDIR(dir_name)
+	dir_entry, err := createDIR(dir_name, attr_directory)
 	if err != nil {
 		return nil, err
 	}
@@ -423,33 +404,20 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	}
 
 	// Create and write out the '.' and '..' entries.
-	dot_dir_name, _ := createDIRName(".", true)
-	dot_dir := DIR{
-		dot_dir_name,
-		attr_directory,
-		0, 0, 0, 0, 0,
-		dir_entry.cluster_hi,
-		dir_entry.wrt_time,
-		dir_entry.wrt_date,
-		dir_entry.cluster_lo,
-		0,
-	}
-	dot_dir_end_loc, err := writeDIR(fs, &dot_dir, free_cluster_bytes)
+	dot_dir, err := createSystemDIR(".", attr_directory|attr_system)
 	if err != nil {
 		return nil, err
 	}
-	dotdot_dir_name, _ := createDIRName("..", true)
-	dotdot_dir := DIR{
-		dotdot_dir_name,
-		attr_directory,
-		0, 0, 0, 0, 0,
-		base_dir.DIREntry.cluster_hi,
-		dir_entry.wrt_time,
-		dir_entry.wrt_date,
-		base_dir.DIREntry.cluster_lo,
-		0,
+	dot_dir_end_loc, err := writeDIR(fs, dot_dir, free_cluster_bytes)
+	if err != nil {
+		return nil, err
 	}
-	if _, err = writeDIR(fs, &dotdot_dir, dot_dir_end_loc); err != nil {
+
+	dotdot_dir, err := createSystemDIR("..", attr_directory|attr_system)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = writeDIR(fs, dotdot_dir, dot_dir_end_loc); err != nil {
 		return nil, err
 	}
 
