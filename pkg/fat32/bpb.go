@@ -8,57 +8,64 @@ import (
 	"github.com/zni/fslib/internal/utilities"
 )
 
-type BPB struct {
-	jmp_boot []uint8
-	oem_name []uint8
-
-	bytes_per_sector      uint16
-	sectors_per_cluster   uint8
-	reserved_sector_count uint16
-	number_of_fats        uint8
-	root_ent_cnt          uint16
-	total_sectors_16      uint16
-	media                 uint8
-	fat_size_16           uint16
-	sectors_per_track     uint16
-	num_heads             uint16
-	hidden_sectors        uint32
-	total_sectors_32      uint32
-
-	fat_size_32  uint32
-	extflags     uint16
-	fs_version   uint16
-	root_cluster uint32
-	fsinfo       uint16
-	bkbootsec    uint16
-
-	drive_num     uint8
-	boot_sig      uint8
-	volume_id     uint32
-	volume_label  []uint8
-	file_sys_type []uint8
-
-	signature_word []uint8
+type BPB32 struct {
+	Common   BPB
+	Extended ExtBPB32
 }
 
-func readBPB(f *os.File) (*BPB, error) {
+// TODO
+// Common to all FAT types.
+// Move somewhere that is not here.
+type BPB struct {
+	bs_jmpboot [3]byte
+	bs_oemname [8]byte
+
+	bpb_bytspersec uint16
+	bpb_secperclus byte
+	bpb_rsvdseccnt uint16
+	bpb_numfats    byte
+	bpb_rootentcnt uint16
+	bpb_totsec16   uint16
+	bpb_media      byte
+	bpb_fatsz16    uint16
+	bpb_secpertrk  uint16
+	bpb_numheads   uint16
+	bpb_hiddsec    uint32
+	bpb_totsec32   uint32
+}
+
+type ExtBPB32 struct {
+	bpb_fatsz32   uint32
+	bpb_extflags  uint16
+	bpb_fsver     uint16
+	bpb_rootclus  uint32
+	bpb_fsinfo    uint16
+	bpb_bkbootsec uint16
+	bpb_reserved  [12]byte
+	bs_drvum      byte
+	bs_reserved1  byte
+	bs_bootsig    byte
+	bs_volid      uint32
+	bs_vollab     [11]byte
+	bs_filsystype [8]byte
+
+	// 420 pad 0x00 bytes erryday
+
+	signature_word [2]byte
+}
+
+func readBPB(f *os.File) (*BPB32, error) {
 	var bpb BPB = BPB{}
-	bpb.jmp_boot = make([]uint8, 3)
-	bpb.oem_name = make([]uint8, 8)
-	bpb.volume_label = make([]uint8, 11)
-	bpb.file_sys_type = make([]uint8, 8)
-	bpb.signature_word = make([]uint8, 2)
+	short_ := make([]byte, 2)
+	byte_ := make([]byte, 1)
+	int_ := make([]byte, 4)
 
-	short_ := make([]uint8, 2)
-	byte_ := make([]uint8, 1)
-	int_ := make([]uint8, 4)
-
-	_, err := f.Read(bpb.jmp_boot)
+	_, err := io.ReadFull(f, bpb.bs_jmpboot[:])
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = f.Read(bpb.oem_name)
+	_, err = io.ReadFull(f, bpb.bs_oemname[:])
 	if err != nil {
 		return nil, err
 	}
@@ -67,109 +74,110 @@ func readBPB(f *os.File) (*BPB, error) {
 	if err != nil {
 		return nil, err
 	}
-	bpb.bytes_per_sector = utilities.BytesToShort(short_)
+	bpb.bpb_bytspersec = utilities.BytesToShort(short_)
 
 	_, err = f.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.sectors_per_cluster = byte_[0]
+	bpb.bpb_secperclus = byte_[0]
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.reserved_sector_count = utilities.BytesToShort(short_)
+	bpb.bpb_rsvdseccnt = utilities.BytesToShort(short_)
 
 	_, err = f.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.number_of_fats = byte_[0]
+	bpb.bpb_numfats = byte_[0]
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.root_ent_cnt = utilities.BytesToShort(short_)
+	bpb.bpb_rootentcnt = utilities.BytesToShort(short_)
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.total_sectors_16 = utilities.BytesToShort(short_)
+	bpb.bpb_totsec16 = utilities.BytesToShort(short_)
 
 	_, err = f.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.media = byte_[0]
+	bpb.bpb_media = byte_[0]
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.fat_size_16 = utilities.BytesToShort(short_)
+	bpb.bpb_fatsz16 = utilities.BytesToShort(short_)
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.sectors_per_track = utilities.BytesToShort(short_)
+	bpb.bpb_secpertrk = utilities.BytesToShort(short_)
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.num_heads = utilities.BytesToShort(short_)
+	bpb.bpb_numheads = utilities.BytesToShort(short_)
 
 	_, err = f.Read(int_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.hidden_sectors = utilities.BytesToInt(int_)
+	bpb.bpb_hiddsec = utilities.BytesToInt(int_)
 
 	_, err = f.Read(int_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.total_sectors_32 = utilities.BytesToInt(int_)
+	bpb.bpb_totsec32 = utilities.BytesToInt(int_)
+
+	var extbpb ExtBPB32 = ExtBPB32{}
+	_, err = f.Read(int_)
+	if err != nil {
+		return nil, err
+	}
+	extbpb.bpb_fatsz32 = utilities.BytesToInt(int_)
+
+	_, err = f.Read(short_)
+	if err != nil {
+		return nil, err
+	}
+	extbpb.bpb_extflags = utilities.BytesToShort(short_)
+
+	_, err = f.Read(short_)
+	if err != nil {
+		return nil, err
+	}
+	extbpb.bpb_fsver = utilities.BytesToShort(short_)
 
 	_, err = f.Read(int_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.fat_size_32 = utilities.BytesToInt(int_)
+	extbpb.bpb_rootclus = utilities.BytesToInt(int_)
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.extflags = utilities.BytesToShort(short_)
+	extbpb.bpb_fsinfo = utilities.BytesToShort(short_)
 
 	_, err = f.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.fs_version = utilities.BytesToShort(short_)
-
-	_, err = f.Read(int_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.root_cluster = utilities.BytesToInt(int_)
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.fsinfo = utilities.BytesToShort(short_)
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.bkbootsec = utilities.BytesToShort(short_)
+	extbpb.bpb_bkbootsec = utilities.BytesToShort(short_)
 
 	_, err = f.Seek(12, io.SeekCurrent)
 	if err != nil {
@@ -180,7 +188,7 @@ func readBPB(f *os.File) (*BPB, error) {
 	if err != nil {
 		return nil, err
 	}
-	bpb.drive_num = byte_[0]
+	extbpb.bs_drvum = byte_[0]
 
 	_, err = f.Seek(1, io.SeekCurrent)
 	if err != nil {
@@ -191,20 +199,20 @@ func readBPB(f *os.File) (*BPB, error) {
 	if err != nil {
 		return nil, err
 	}
-	bpb.boot_sig = byte_[0]
+	extbpb.bs_bootsig = byte_[0]
 
 	_, err = f.Read(int_)
 	if err != nil {
 		return nil, err
 	}
-	bpb.volume_id = utilities.BytesToInt(int_)
+	extbpb.bs_volid = utilities.BytesToInt(int_)
 
-	_, err = f.Read(bpb.volume_label)
+	_, err = f.Read(extbpb.bs_vollab[:])
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = f.Read(bpb.file_sys_type)
+	_, err = f.Read(extbpb.bs_filsystype[:])
 	if err != nil {
 		return nil, err
 	}
@@ -214,14 +222,14 @@ func readBPB(f *os.File) (*BPB, error) {
 		return nil, err
 	}
 
-	_, err = f.Read(bpb.signature_word)
+	_, err = f.Read(extbpb.signature_word[:])
 	if err != nil {
 		return nil, err
 	}
 
-	if bpb.signature_word[0] != 0x55 && bpb.signature_word[1] != 0xAA {
+	if extbpb.signature_word[0] != 0x55 && extbpb.signature_word[1] != 0xAA {
 		return nil, errors.New("invalid BPB signature")
 	}
 
-	return &bpb, nil
+	return &BPB32{bpb, extbpb}, nil
 }

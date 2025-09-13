@@ -41,7 +41,7 @@ func writeFAT(fs *FAT32) error {
 }
 
 func seekToFAT(fs *FAT32) error {
-	var fat_loc int64 = int64(fs.BPB.reserved_sector_count) * int64(fs.BPB.bytes_per_sector)
+	var fat_loc int64 = int64(fs.BPB.Common.bpb_rsvdseccnt) * int64(fs.BPB.Common.bpb_bytspersec)
 	if _, err := fs.file.Seek(fat_loc, io.SeekStart); err != nil {
 		return err
 	}

@@ -77,7 +77,7 @@ func readFSInfo(f *os.File) (*FSInfo, error) {
 }
 
 func seekToFSInfo(fs *FAT32) error {
-	if _, err := fs.file.Seek(int64(fs.BPB.bytes_per_sector), io.SeekStart); err != nil {
+	if _, err := fs.file.Seek(int64(fs.BPB.Common.bpb_bytspersec), io.SeekStart); err != nil {
 		return err
 	}
 
