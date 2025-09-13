@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/zni/fslib/internal/utilities"
+	"github.com/zni/fslib/pkg/fat/common"
 )
 
 const backup_bpb_sector uint16 = 6
@@ -19,7 +20,7 @@ type File struct {
 	_ldir_loc uint32
 	_dir_loc  uint32
 	LDIREntry []*LDIR
-	DIREntry  *DIR
+	DIREntry  *common.DIR
 	fat32     *FAT32
 }
 
@@ -160,13 +161,13 @@ func getFile(fs *FAT32) (*File, error) {
 		return nil, err
 	}
 
-	dir_entry, err := readDIR(fs)
+	dir_entry, err := common.ReadDIR(fs.file)
 	if err != nil {
 		return nil, err
 	}
 
 	if name == "" {
-		name = strings.Trim(string(dir_entry.name), " ")
+		name = strings.Trim(string(dir_entry.DIR_name), " ")
 	}
 
 	return &File{name, nil, uint32(ldir_loc), uint32(dir_loc), ldirs, dir_entry, fs}, nil
@@ -225,10 +226,10 @@ func (fs *FAT32) ReadFile(file_path string) (*File, error) {
 		}
 
 		// If the file matches part of the path and it's a directory, get ready to descend.
-		if file.Name == s && ((file.DIREntry.attr & attr_directory) == attr_directory) {
+		if file.Name == s && common.IsDirectory(file.DIREntry) {
 			cluster := utilities.DirClusterToUint(
-				uint(file.DIREntry.cluster_lo),
-				uint(file.DIREntry.cluster_hi),
+				uint(file.DIREntry.DIR_cluster_lo),
+				uint(file.DIREntry.DIR_cluster_hi),
 			)
 			_, err = fs.file.Seek(int64(lookupClusterBytes(fs, cluster)), io.SeekStart)
 			if err != nil {
@@ -270,12 +271,12 @@ func getNextFreeDIR(fs *FAT32, cluster uint32) (int64, error) {
 
 	cluster_boundary := lookupClusterBytes(fs, (cluster + 1))
 	for current_location < int64(cluster_boundary) {
-		dir, err := readDIR(fs)
+		dir, err := common.ReadDIR(fs.file)
 		if err != nil {
 			return -1, nil
 		}
 
-		if dir.name[0] == 0x00 {
+		if dir.DIR_name[0] == 0x00 {
 			return current_location, nil
 		}
 
@@ -360,7 +361,7 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	}
 
 	// Create our DIR and LDIR entries.
-	dir_entry, err := createDIR(dir_name, attr_directory)
+	dir_entry, err := common.CreateDIR(dir_name, common.DIR_ATTR_DIRECTORY)
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create DIR: %w", err)}
 	}
@@ -373,8 +374,8 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	// Compute the next free cluster and free space for our
 	// DIR and LDIR entries.
 	base_dir_cluster := utilities.DirClusterToUint(
-		uint(base_dir.DIREntry.cluster_lo),
-		uint(base_dir.DIREntry.cluster_hi),
+		uint(base_dir.DIREntry.DIR_cluster_lo),
+		uint(base_dir.DIREntry.DIR_cluster_hi),
 	)
 	cluster_bytes := lookupClusterBytes(fs, base_dir_cluster)
 	free_cluster, err := getNextFreeCluster(fs)
@@ -386,15 +387,15 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to get next free DIR: %w", err)}
 	}
-	dir_entry.cluster_lo = uint16(free_cluster & 0x0000FFFF)
-	dir_entry.cluster_hi = uint16((free_cluster & 0xFFFF0000) >> 16)
+	dir_entry.DIR_cluster_lo = uint16(free_cluster & 0x0000FFFF)
+	dir_entry.DIR_cluster_hi = uint16((free_cluster & 0xFFFF0000) >> 16)
 
 	// Write out the LDIR and DIR entries for the directory.
 	ldir_end_location, err := writeLDIRs(fs, ldirs, next_free_bytes)
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write LDIR entries: %w", err)}
 	}
-	_, err = writeDIR(fs, dir_entry, ldir_end_location)
+	_, err = common.WriteDIR(fs.file, dir_entry, ldir_end_location)
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write DIR entry: %w", err)}
 	}
@@ -405,20 +406,26 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	}
 
 	// Create and write out the '.' and '..' entries.
-	dot_dir, err := createSystemDIR(".", attr_directory|attr_system)
+	dot_dir, err := common.CreateSystemDIR(
+		".",
+		(common.DIR_ATTR_DIRECTORY | common.DIR_ATTR_SYSTEM),
+	)
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create '.' entry: %w", err)}
 	}
-	dot_dir_end_loc, err := writeDIR(fs, dot_dir, free_cluster_bytes)
+	dot_dir_end_loc, err := common.WriteDIR(fs.file, dot_dir, free_cluster_bytes)
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write '.' entry: %w", err)}
 	}
 
-	dotdot_dir, err := createSystemDIR("..", attr_directory|attr_system)
+	dotdot_dir, err := common.CreateSystemDIR(
+		"..",
+		(common.DIR_ATTR_DIRECTORY | common.DIR_ATTR_SYSTEM),
+	)
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to create '..' entry: %w", err)}
 	}
-	if _, err = writeDIR(fs, dotdot_dir, dot_dir_end_loc); err != nil {
+	if _, err = common.WriteDIR(fs.file, dotdot_dir, dot_dir_end_loc); err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to write '..' entry: %w", err)}
 	}
 
@@ -463,8 +470,8 @@ func (fs *FAT32) PrintInfo() {
 	fmt.Printf("\\ volume_filename: %s\n", path.Base(fs.file.Name()))
 	fmt.Printf("\\ bytes_per_sector: %d\n", fs.BPB.Common.BPB_bytspersec)
 	fmt.Printf("\\ sectors_per_cluster: %d\n", fs.BPB.Common.BPB_secperclus)
-	fmt.Printf("\\ volume_label: %v\n", string(fs.BPB.Extended.bs_vollab[:]))
-	fmt.Printf("\\ file_sys_type: %v\n", string(fs.BPB.Extended.bs_filsystype[:]))
+	fmt.Printf("\\ volume_label: %v\n", string(fs.BPB.Extended.BS_vollab[:]))
+	fmt.Printf("\\ file_sys_type: %v\n", string(fs.BPB.Extended.BS_filsystype[:]))
 	fmt.Printf("\\ free_clusters: %v\n", fs.FSInfo.free_count)
 	fmt.Printf("\\ next_free_cluster: %v\n", fs.FSInfo.next_free)
 	fmt.Println("")
@@ -480,18 +487,18 @@ func (file *File) PrintInfo() {
 	fmt.Printf("\\ filename  : %s\n", file.Name)
 	fmt.Printf("\\ LDIR loc  : %08x\n", file._ldir_loc)
 	fmt.Printf("\\ DIR loc   : %08x\n", file._dir_loc)
-	if (file.DIREntry.attr & attr_directory) == attr_directory {
+	if common.IsDirectory(file.DIREntry) {
 		fmt.Printf("\\ directory?: true\n")
 	} else {
 		fmt.Printf("\\ directory?: false\n")
 	}
 	fmt.Printf("\\ cluster   : %d\n",
 		utilities.DirClusterToUint(
-			uint(file.DIREntry.cluster_lo),
-			uint(file.DIREntry.cluster_hi),
+			uint(file.DIREntry.DIR_cluster_lo),
+			uint(file.DIREntry.DIR_cluster_hi),
 		),
 	)
-	fmt.Printf("\\ file size : %d\n", file.DIREntry.filesize)
+	fmt.Printf("\\ file size : %d\n", file.DIREntry.DIR_filesize)
 	fmt.Println("")
 }
 
@@ -499,7 +506,7 @@ func (file *File) PrintInfo() {
 Read a file's complete contents from the volume into the File.Content struct member.
 */
 func (file *File) ReadAll() (bytes_read int, err error) {
-	file.Content = make([]uint8, file.DIREntry.filesize)
+	file.Content = make([]uint8, file.DIREntry.DIR_filesize)
 	return file.Read(file.Content)
 }
 
@@ -507,11 +514,11 @@ func (file *File) ReadAll() (bytes_read int, err error) {
 Read a portion of a file's contents from the volume into the buffer provided.
 */
 func (file *File) Read(b []byte) (n int, err error) {
-	if (file.DIREntry.attr & attr_directory) == attr_directory {
+	if common.IsDirectory(file.DIREntry) {
 		return 0, &FileError{"Read", file.Name, fmt.Errorf("file must not be a directory")}
 	}
 
-	var file_size int = int(file.DIREntry.filesize)
+	var file_size int = int(file.DIREntry.DIR_filesize)
 	var cluster_size int = int(file.fat32.BPB.Common.BPB_bytspersec) * int(file.fat32.BPB.Common.BPB_secperclus)
 	var bytes_to_read int = len(b)
 	if bytes_to_read > file_size {
@@ -526,8 +533,8 @@ func (file *File) Read(b []byte) (n int, err error) {
 	}
 
 	file_cluster := utilities.DirClusterToUint(
-		uint(file.DIREntry.cluster_lo),
-		uint(file.DIREntry.cluster_hi),
+		uint(file.DIREntry.DIR_cluster_lo),
+		uint(file.DIREntry.DIR_cluster_hi),
 	)
 	file_loc_bytes := lookupClusterBytes(file.fat32, file_cluster)
 

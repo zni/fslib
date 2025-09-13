@@ -1,16 +1,23 @@
 package fat12
 
-type ExtBPB struct {
-	bs_drvum      uint8
-	bs_reserved1  uint8
-	bs_bootsig    uint8
+import "github.com/zni/fslib/pkg/fat/common"
+
+type BPB12 struct {
+	Common   common.BPB
+	Extended ExtBPB12
+}
+
+type ExtBPB12 struct {
+	bs_drvnum     byte
+	bs_reserved1  byte
+	bs_bootsig    byte
 	bs_volid      uint32
-	bs_vollab     [11]uint8
-	bs_filsystype [8]uint8
+	bs_vollab     [11]byte
+	bs_filsystype [8]byte
 
 	// Padded for 448 bytes with value 0x00
 
-	signature_word uint16
+	signature_word [2]byte
 
 	// Pad out sector with 0x00
 	// Only for media where bpb_bytspersec > 512

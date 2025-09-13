@@ -9,10 +9,11 @@ import (
 	"unicode/utf16"
 
 	"github.com/zni/fslib/internal/utilities"
+	"github.com/zni/fslib/pkg/fat/common"
 )
 
 const last_long_entry uint8 = 0x40
-const long_entry uint8 = (attr_readonly | attr_hidden | attr_system | attr_volume_id)
+const long_entry uint8 = (common.DIR_ATTR_READONLY | common.DIR_ATTR_HIDDEN | common.DIR_ATTR_SYSTEM | common.DIR_ATTR_VOLUME_ID)
 
 type LDIR struct {
 	ordinal    uint8
@@ -114,14 +115,14 @@ func joinLDIRs(ldirs []*LDIR) string {
 /*
 Compute the checksum over the DIR entry used to validate live LDIR entries.
 */
-func computeShortChecksum(dir *DIR) uint8 {
+func computeShortChecksum(dir *common.DIR) uint8 {
 	var chksum uint8 = 0
 	j := 0
 	for i := 11; i != 0; i-- {
 		if (chksum & 1) == 1 {
-			chksum = 0x80 + (chksum >> 1) + dir.name[j]
+			chksum = 0x80 + (chksum >> 1) + dir.DIR_name[j]
 		} else {
-			chksum = 0 + (chksum >> 1) + dir.name[j]
+			chksum = 0 + (chksum >> 1) + dir.DIR_name[j]
 		}
 		j++
 	}

@@ -10,8 +10,8 @@ import (
 )
 
 type BPB32 struct {
-	Common   common.BPB
-	Extended ExtBPB32
+	Common   *common.BPB
+	Extended *ExtBPB32
 }
 
 type ExtBPB32 struct {
@@ -22,12 +22,12 @@ type ExtBPB32 struct {
 	BPB_fsinfo    uint16
 	BPB_bkbootsec uint16
 	BPB_reserved  [12]byte
-	bs_drvum      byte
-	bs_reserved1  byte
-	bs_bootsig    byte
-	bs_volid      uint32
-	bs_vollab     [11]byte
-	bs_filsystype [8]byte
+	BS_drvnum     byte
+	BS_reserved1  byte
+	BS_bootsig    byte
+	BS_volid      uint32
+	BS_vollab     [11]byte
+	BS_filsystype [8]byte
 
 	// 420 pad 0x00 bytes erryday
 
@@ -35,92 +35,14 @@ type ExtBPB32 struct {
 }
 
 func readBPB(f *os.File) (*BPB32, error) {
-	var bpb common.BPB = common.BPB{}
+	var bpb, err = common.ReadCommonBPB(f)
+	if err != nil {
+		return nil, err
+	}
+
 	short_ := make([]byte, 2)
 	byte_ := make([]byte, 1)
 	int_ := make([]byte, 4)
-
-	_, err := io.ReadFull(f, bpb.BS_jmpboot[:])
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = io.ReadFull(f, bpb.BS_oemname[:])
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_bytspersec = utilities.BytesToShort(short_)
-
-	_, err = f.Read(byte_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_secperclus = byte_[0]
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_rsvdseccnt = utilities.BytesToShort(short_)
-
-	_, err = f.Read(byte_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_numfats = byte_[0]
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_rootentcnt = utilities.BytesToShort(short_)
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_totsec16 = utilities.BytesToShort(short_)
-
-	_, err = f.Read(byte_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_media = byte_[0]
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_fatsz16 = utilities.BytesToShort(short_)
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_secpertrk = utilities.BytesToShort(short_)
-
-	_, err = f.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_numheads = utilities.BytesToShort(short_)
-
-	_, err = f.Read(int_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_hiddsec = utilities.BytesToInt(int_)
-
-	_, err = f.Read(int_)
-	if err != nil {
-		return nil, err
-	}
-	bpb.BPB_totsec32 = utilities.BytesToInt(int_)
 
 	var extbpb ExtBPB32 = ExtBPB32{}
 	_, err = f.Read(int_)
@@ -168,7 +90,7 @@ func readBPB(f *os.File) (*BPB32, error) {
 	if err != nil {
 		return nil, err
 	}
-	extbpb.bs_drvum = byte_[0]
+	extbpb.BS_drvnum = byte_[0]
 
 	_, err = f.Seek(1, io.SeekCurrent)
 	if err != nil {
@@ -179,20 +101,20 @@ func readBPB(f *os.File) (*BPB32, error) {
 	if err != nil {
 		return nil, err
 	}
-	extbpb.bs_bootsig = byte_[0]
+	extbpb.BS_bootsig = byte_[0]
 
 	_, err = f.Read(int_)
 	if err != nil {
 		return nil, err
 	}
-	extbpb.bs_volid = utilities.BytesToInt(int_)
+	extbpb.BS_volid = utilities.BytesToInt(int_)
 
-	_, err = f.Read(extbpb.bs_vollab[:])
+	_, err = f.Read(extbpb.BS_vollab[:])
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = f.Read(extbpb.bs_filsystype[:])
+	_, err = f.Read(extbpb.BS_filsystype[:])
 	if err != nil {
 		return nil, err
 	}
@@ -211,5 +133,5 @@ func readBPB(f *os.File) (*BPB32, error) {
 		return nil, errors.New("invalid BPB signature")
 	}
 
-	return &BPB32{bpb, extbpb}, nil
+	return &BPB32{bpb, &extbpb}, nil
 }

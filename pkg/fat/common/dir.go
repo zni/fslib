@@ -1,9 +1,10 @@
-package fat32
+package common
 
 import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -11,26 +12,26 @@ import (
 	"github.com/zni/fslib/internal/utilities"
 )
 
-const attr_readonly uint8 = 0x01
-const attr_hidden uint8 = 0x02
-const attr_system uint8 = 0x04
-const attr_volume_id uint8 = 0x08
-const attr_directory uint8 = 0x10
-const attr_archive uint8 = 0x20
+const DIR_ATTR_READONLY uint8 = 0x01
+const DIR_ATTR_HIDDEN uint8 = 0x02
+const DIR_ATTR_SYSTEM uint8 = 0x04
+const DIR_ATTR_VOLUME_ID uint8 = 0x08
+const DIR_ATTR_DIRECTORY uint8 = 0x10
+const DIR_ATTR_ARCHIVE uint8 = 0x20
 
 type DIR struct {
-	name           []uint8
-	attr           uint8
-	ntres          uint8
-	crt_time_tenth uint8
-	crt_time       uint16
-	crt_date       uint16
-	lst_acc_date   uint16
-	cluster_hi     uint16
-	wrt_time       uint16
-	wrt_date       uint16
-	cluster_lo     uint16
-	filesize       uint32
+	DIR_name           []uint8
+	DIR_attr           uint8
+	DIR_ntres          uint8
+	DIR_crt_time_tenth uint8
+	DIR_crt_time       uint16
+	DIR_crt_date       uint16
+	DIR_lst_acc_date   uint16
+	DIR_cluster_hi     uint16
+	DIR_wrt_time       uint16
+	DIR_wrt_date       uint16
+	DIR_cluster_lo     uint16
+	DIR_filesize       uint32
 }
 
 /*
@@ -57,7 +58,7 @@ func validCharacter(c rune) bool {
 /*
 Create the truncated DOS-style name for a given file.
 */
-func createDIRName(name string, system bool) ([]uint8, error) {
+func CreateDIRName(name string, system bool) ([]uint8, error) {
 	uppercase_name := strings.ToUpper(name)
 	uppercase_name = strings.ReplaceAll(uppercase_name, " ", "")
 	if len(uppercase_name) > 11 {
@@ -86,52 +87,52 @@ func createDIRName(name string, system bool) ([]uint8, error) {
 /*
 Read a single DIR entry from the volume.
 */
-func readDIR(fs *FAT32) (*DIR, error) {
+func ReadDIR(fs *os.File) (*DIR, error) {
 	var byte_ []uint8 = make([]uint8, 1)
 	var short_ []uint8 = make([]uint8, 2)
 	var int_ []uint8 = make([]uint8, 4)
 
 	var dir_entry DIR
 
-	dir_entry.name = make([]uint8, 11)
-	_, err := fs.file.Read(dir_entry.name)
+	dir_entry.DIR_name = make([]uint8, 11)
+	_, err := fs.Read(dir_entry.DIR_name)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = fs.file.Read(byte_)
+	_, err = fs.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
-	dir_entry.attr = byte_[0]
+	dir_entry.DIR_attr = byte_[0]
 
-	_, err = fs.file.Seek(8, io.SeekCurrent)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = fs.file.Read(short_)
-	if err != nil {
-		return nil, err
-	}
-	dir_entry.cluster_hi = utilities.BytesToShort(short_)
-
-	_, err = fs.file.Seek(4, io.SeekCurrent)
+	_, err = fs.Seek(8, io.SeekCurrent)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = fs.file.Read(short_)
+	_, err = fs.Read(short_)
 	if err != nil {
 		return nil, err
 	}
-	dir_entry.cluster_lo = utilities.BytesToShort(short_)
+	dir_entry.DIR_cluster_hi = utilities.BytesToShort(short_)
 
-	_, err = fs.file.Read(int_)
+	_, err = fs.Seek(4, io.SeekCurrent)
 	if err != nil {
 		return nil, err
 	}
-	dir_entry.filesize = utilities.BytesToInt(int_)
+
+	_, err = fs.Read(short_)
+	if err != nil {
+		return nil, err
+	}
+	dir_entry.DIR_cluster_lo = utilities.BytesToShort(short_)
+
+	_, err = fs.Read(int_)
+	if err != nil {
+		return nil, err
+	}
+	dir_entry.DIR_filesize = utilities.BytesToInt(int_)
 
 	return &dir_entry, nil
 }
@@ -139,7 +140,7 @@ func readDIR(fs *FAT32) (*DIR, error) {
 /*
 Generate the write time for the file being created.
 */
-func createWriteTime() (uint16, uint16) {
+func CreateWriteTime() (uint16, uint16) {
 	current_time := time.Now().UTC()
 	seconds := 0
 	minutes := current_time.Minute()
@@ -157,75 +158,79 @@ func createWriteTime() (uint16, uint16) {
 /*
 Create a DIR entry for the given name.
 */
-func createDIR(name string, attrs uint8) (*DIR, error) {
-	dir_format_name, err := createDIRName(name, false)
+func CreateDIR(name string, attrs uint8) (*DIR, error) {
+	dir_format_name, err := CreateDIRName(name, false)
 	if err != nil {
 		return nil, err
 	}
 
-	write_time, write_date := createWriteTime()
+	write_time, write_date := CreateWriteTime()
 	return &DIR{dir_format_name, attrs, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
 }
 
-func createSystemDIR(name string, attrs uint8) (*DIR, error) {
-	dir_format_name, err := createDIRName(name, true)
+func CreateSystemDIR(name string, attrs uint8) (*DIR, error) {
+	dir_format_name, err := CreateDIRName(name, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create system DIR: %w", err)
 	}
 
-	write_time, write_date := createWriteTime()
+	write_time, write_date := CreateWriteTime()
 	return &DIR{dir_format_name, attrs, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
 }
 
 /*
 Write out a DIR entry dir to the location loc on disk.
 */
-func writeDIR(fs *FAT32, dir *DIR, loc uint32) (uint32, error) {
-	if _, err := fs.file.Seek(int64(loc), io.SeekStart); err != nil {
+func WriteDIR(fs *os.File, dir *DIR, loc uint32) (uint32, error) {
+	if _, err := fs.Seek(int64(loc), io.SeekStart); err != nil {
 		return 0, err
 	}
 
-	if _, err := fs.file.Write(dir.name); err != nil {
+	if _, err := fs.Write(dir.DIR_name); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write([]uint8{dir.attr}); err != nil {
+	if _, err := fs.Write([]uint8{dir.DIR_attr}); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write([]uint8{dir.ntres}); err != nil {
+	if _, err := fs.Write([]uint8{dir.DIR_ntres}); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write([]uint8{dir.crt_time_tenth}); err != nil {
+	if _, err := fs.Write([]uint8{dir.DIR_crt_time_tenth}); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.crt_time)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_crt_time)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.crt_date)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_crt_date)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.lst_acc_date)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_lst_acc_date)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.cluster_hi)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_cluster_hi)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.wrt_time)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_wrt_time)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.wrt_date)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_wrt_date)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.ShortToBytes(dir.cluster_lo)); err != nil {
+	if _, err := fs.Write(utilities.ShortToBytes(dir.DIR_cluster_lo)); err != nil {
 		return 0, err
 	}
-	if _, err := fs.file.Write(utilities.IntToBytes(dir.filesize)); err != nil {
+	if _, err := fs.Write(utilities.IntToBytes(dir.DIR_filesize)); err != nil {
 		return 0, err
 	}
 
-	end_loc, err := fs.file.Seek(0, io.SeekCurrent)
+	end_loc, err := fs.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}
 
 	return uint32(end_loc), nil
+}
+
+func IsDirectory(d *DIR) bool {
+	return (d.DIR_attr & DIR_ATTR_DIRECTORY) == DIR_ATTR_DIRECTORY
 }
