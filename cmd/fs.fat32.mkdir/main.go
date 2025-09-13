@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/zni/fslib/internal/utilities"
-	fat32 "github.com/zni/fslib/pkg/fat32"
+	fat32 "github.com/zni/fslib/pkg/fat/fat32"
 )
 
 func main() {

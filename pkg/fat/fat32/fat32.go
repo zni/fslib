@@ -65,7 +65,7 @@ func Load(path string) (*FAT32, error) {
 		return nil, &FSError{"Load", path, fmt.Errorf("failed to read FSInfo: %w", err)}
 	}
 
-	_, err = file.Seek(int64(bpb.Common.bpb_bytspersec*backup_bpb_sector), io.SeekStart)
+	_, err = file.Seek(int64(bpb.Common.BPB_bytspersec*backup_bpb_sector), io.SeekStart)
 	if err != nil {
 		return nil, &FSError{"Load", path, fmt.Errorf("failed to read backup BPB: %w", err)}
 	}
@@ -79,13 +79,13 @@ func Load(path string) (*FAT32, error) {
 		return nil, &FSError{"Load", path, fmt.Errorf("failed to read backup FSInfo: %w", err)}
 	}
 
-	_, err = file.Seek(int64(bpb.Common.bpb_rsvdseccnt)*int64(bpb.Common.bpb_bytspersec), io.SeekStart)
+	_, err = file.Seek(int64(bpb.Common.BPB_rsvdseccnt)*int64(bpb.Common.BPB_bytspersec), io.SeekStart)
 	if err != nil {
 		return nil, &FSError{"Load", path, fmt.Errorf("failed to read FAT: %w", err)}
 	}
 
-	data_sectors := bpb.Common.bpb_totsec32 - (uint32(bpb.Common.bpb_rsvdseccnt) + uint32(bpb.Common.bpb_numfats)*bpb.Extended.bpb_fatsz32)
-	max_clusters := (data_sectors / uint32(bpb.Common.bpb_secperclus)) + 1
+	data_sectors := bpb.Common.BPB_totsec32 - (uint32(bpb.Common.BPB_rsvdseccnt) + uint32(bpb.Common.BPB_numfats)*bpb.Extended.BPB_fatsz32)
+	max_clusters := (data_sectors / uint32(bpb.Common.BPB_secperclus)) + 1
 	fat, err := readFAT(
 		file,
 		max_clusters,
@@ -109,12 +109,12 @@ func Load(path string) (*FAT32, error) {
 Look up the location in bytes of the given cluster.
 */
 func lookupClusterBytes(fs *FAT32, cluster uint32) uint32 {
-	var reserved_bytes int64 = int64(fs.BPB.Common.bpb_rsvdseccnt * fs.BPB.Common.bpb_bytspersec)
-	var fat_bytes int64 = int64(2 * (fs.BPB.Extended.bpb_fatsz32 * uint32(fs.BPB.Common.bpb_bytspersec)))
+	var reserved_bytes int64 = int64(fs.BPB.Common.BPB_rsvdseccnt * fs.BPB.Common.BPB_bytspersec)
+	var fat_bytes int64 = int64(2 * (fs.BPB.Extended.BPB_fatsz32 * uint32(fs.BPB.Common.BPB_bytspersec)))
 	data_sector := reserved_bytes + fat_bytes
 
-	var current_cluster int64 = int64(cluster - fs.BPB.Extended.bpb_rootclus)
-	var cluster_size int64 = int64(fs.BPB.Common.bpb_bytspersec * uint16(fs.BPB.Common.bpb_secperclus))
+	var current_cluster int64 = int64(cluster - fs.BPB.Extended.BPB_rootclus)
+	var cluster_size int64 = int64(fs.BPB.Common.BPB_bytspersec * uint16(fs.BPB.Common.BPB_secperclus))
 	cluster_sector := current_cluster * cluster_size
 
 	return uint32(data_sector + cluster_sector)
@@ -177,7 +177,7 @@ Read a file from the volume given by the path.
 */
 func (fs *FAT32) ReadFile(file_path string) (*File, error) {
 	// Start in the root cluster and calculate the cluster boundary.
-	current_cluster := fs.BPB.Extended.bpb_rootclus
+	current_cluster := fs.BPB.Extended.BPB_rootclus
 	_, err := fs.file.Seek(int64(lookupClusterBytes(fs, current_cluster)), io.SeekStart)
 	if err != nil {
 		return nil, &FSError{"ReadFile", file_path, fmt.Errorf("failed to seek to cluster: %w", err)}
@@ -303,7 +303,7 @@ func zeroCluster(fs *FAT32, cluster uint32) error {
 		return err
 	}
 
-	cluster_size := fs.BPB.Common.bpb_bytspersec * uint16(fs.BPB.Common.bpb_secperclus)
+	cluster_size := fs.BPB.Common.BPB_bytspersec * uint16(fs.BPB.Common.BPB_secperclus)
 	if _, err := fs.file.Write(make([]byte, cluster_size)); err != nil {
 		return err
 	}
@@ -461,8 +461,8 @@ func (fs *FAT32) PrintInfo() {
 	fmt.Printf("|  VOLUME DEBUG INFO  |\n")
 	fmt.Printf("+---------------------+\n")
 	fmt.Printf("\\ volume_filename: %s\n", path.Base(fs.file.Name()))
-	fmt.Printf("\\ bytes_per_sector: %d\n", fs.BPB.Common.bpb_bytspersec)
-	fmt.Printf("\\ sectors_per_cluster: %d\n", fs.BPB.Common.bpb_secperclus)
+	fmt.Printf("\\ bytes_per_sector: %d\n", fs.BPB.Common.BPB_bytspersec)
+	fmt.Printf("\\ sectors_per_cluster: %d\n", fs.BPB.Common.BPB_secperclus)
 	fmt.Printf("\\ volume_label: %v\n", string(fs.BPB.Extended.bs_vollab[:]))
 	fmt.Printf("\\ file_sys_type: %v\n", string(fs.BPB.Extended.bs_filsystype[:]))
 	fmt.Printf("\\ free_clusters: %v\n", fs.FSInfo.free_count)
@@ -512,7 +512,7 @@ func (file *File) Read(b []byte) (n int, err error) {
 	}
 
 	var file_size int = int(file.DIREntry.filesize)
-	var cluster_size int = int(file.fat32.BPB.Common.bpb_bytspersec) * int(file.fat32.BPB.Common.bpb_secperclus)
+	var cluster_size int = int(file.fat32.BPB.Common.BPB_bytspersec) * int(file.fat32.BPB.Common.BPB_secperclus)
 	var bytes_to_read int = len(b)
 	if bytes_to_read > file_size {
 		bytes_to_read = file_size
