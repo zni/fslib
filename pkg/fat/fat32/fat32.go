@@ -42,8 +42,8 @@ type FAT32 struct {
 	FSInfo       *FSInfo
 	BackupBPB    *BPB32
 	BackupFSInfo *FSInfo
-	FAT          []uint32
-	BackupFAT    []uint32
+	FAT          *common.FAT[uint32]
+	BackupFAT    *common.FAT[uint32]
 	file         *os.File
 }
 
@@ -87,7 +87,8 @@ func Load(path string) (*FAT32, error) {
 
 	data_sectors := bpb.Common.BPB_totsec32 - (uint32(bpb.Common.BPB_rsvdseccnt) + uint32(bpb.Common.BPB_numfats)*bpb.Extended.BPB_fatsz32)
 	max_clusters := (data_sectors / uint32(bpb.Common.BPB_secperclus)) + 1
-	fat, err := readFAT(
+	fat := common.MakeFAT32(max_clusters)
+	err = fat.ReadFAT(
 		file,
 		max_clusters,
 	)
@@ -95,7 +96,8 @@ func Load(path string) (*FAT32, error) {
 		return nil, &FSError{"Load", path, fmt.Errorf("failed to read FAT: %w", err)}
 	}
 
-	backup_fat, err := readFAT(
+	backup_fat := common.MakeFAT32(max_clusters)
+	err = backup_fat.ReadFAT(
 		file,
 		max_clusters,
 	)
@@ -248,19 +250,6 @@ func (fs *FAT32) ReadFile(file_path string) (*File, error) {
 }
 
 /*
-Get the next free cluster from the FAT not marked EOC.
-*/
-func getNextFreeCluster(fs *FAT32) (uint32, error) {
-	for i := 2; i < len(fs.FAT); i++ {
-		if fs.FAT[i] == 0 {
-			return uint32(i), nil
-		}
-	}
-
-	return 0, errors.New("no free clusters")
-}
-
-/*
 Get the location for the next free DIR entry in a cluster.
 */
 func getNextFreeDIR(fs *FAT32, cluster uint32) (int64, error) {
@@ -287,13 +276,6 @@ func getNextFreeDIR(fs *FAT32, cluster uint32) (int64, error) {
 	}
 
 	return -1, errors.New("no free space in cluster")
-}
-
-/*
-Mark a cluster in the FAT with the EOC value.
-*/
-func markEOC(fs *FAT32, cluster uint) {
-	fs.FAT[cluster] = fs.FAT[1]
 }
 
 /*
@@ -327,12 +309,15 @@ func syncFileSystemData(fs *FAT32) error {
 	}
 
 	// Seek to FAT
-	if err := seekToFAT(fs); err != nil {
+	if err := common.SeekToFAT(fs.file, fs.BPB.Common); err != nil {
 		return err
 	}
 
 	// Write out FAT and Backup FAT
-	if err := writeFAT(fs); err != nil {
+	if err := fs.FAT.WriteFAT(fs.file); err != nil {
+		return err
+	}
+	if err := fs.BackupFAT.WriteFAT(fs.file); err != nil {
 		return err
 	}
 
@@ -378,7 +363,7 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 		uint(base_dir.DIREntry.DIR_cluster_hi),
 	)
 	cluster_bytes := lookupClusterBytes(fs, base_dir_cluster)
-	free_cluster, err := getNextFreeCluster(fs)
+	free_cluster, err := fs.FAT.GetNextFreeCluster()
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to get cluster: %w", err)}
 	}
@@ -430,10 +415,10 @@ func (fs *FAT32) CreateDir(dir_path string) (*File, error) {
 	}
 
 	// Mark the cluster with the '.' and '..' entries as end of cluster.
-	markEOC(fs, uint(free_cluster))
+	fs.FAT.MarkEOC(uint(free_cluster))
 
 	// Update the FSInfo with the next free cluster and new free cluster count.
-	next_free_cluster, err := getNextFreeCluster(fs)
+	next_free_cluster, err := fs.FAT.GetNextFreeCluster()
 	if err != nil {
 		return nil, &FSError{"CreateDir", dir_path, fmt.Errorf("failed to get cluster for FSInfo: %w", err)}
 	}
@@ -544,7 +529,7 @@ func (file *File) Read(b []byte) (n int, err error) {
 	}
 
 	var total_bytes_read int = 0
-	var EOC uint32 = file.fat32.FAT[1]
+	var EOC uint32 = file.fat32.FAT.GetEOC()
 	var next_cluster uint32 = file_cluster
 	var bytes_read int = 0
 
@@ -564,7 +549,7 @@ func (file *File) Read(b []byte) (n int, err error) {
 
 		// Is the next cluster the end of chain?
 		// If not, calculate the next cluster in the chain.
-		next_cluster = file.fat32.FAT[next_cluster]
+		next_cluster = file.fat32.FAT.GetCluster(uint(next_cluster))
 		if next_cluster != EOC {
 			file_loc_bytes = lookupClusterBytes(file.fat32, next_cluster)
 			if _, err = file.fat32.file.Seek(int64(file_loc_bytes), io.SeekStart); err != nil {
