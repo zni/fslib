@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/zni/fslib/internal/utilities"
-	fat32 "github.com/zni/fslib/pkg/fat/fat32"
+	"github.com/zni/fslib/pkg/fat"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 		utilities.DisplayUsage(flagset)
 	}
 
-	fs, err := fat32.Load(*disk)
+	fs, err := fat.Load(*disk)
 	if err != nil {
 		utilities.HandleError(err)
 	}

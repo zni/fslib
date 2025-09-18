@@ -1,4 +1,4 @@
-package fat32
+package common
 
 import "fmt"
 

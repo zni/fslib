@@ -1,4 +1,4 @@
-package common
+package fat
 
 import (
 	"errors"
@@ -168,7 +168,8 @@ func CreateDIR(name string, attrs uint8) (*DIR, error) {
 	return &DIR{dir_format_name, attrs, 0, 0, 0, 0, 0, 0, write_time, write_date, 0, 0}, nil
 }
 
-func CreateSystemDIR(name string, attrs uint8) (*DIR, error) {
+func CreateSystemDIR(name string) (*DIR, error) {
+	var attrs uint8 = (DIR_ATTR_DIRECTORY | DIR_ATTR_SYSTEM)
 	dir_format_name, err := CreateDIRName(name, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create system DIR: %w", err)
@@ -233,4 +234,34 @@ func WriteDIR(fs *os.File, dir *DIR, loc uint32) (uint32, error) {
 
 func IsDirectory(d *DIR) bool {
 	return (d.DIR_attr & DIR_ATTR_DIRECTORY) == DIR_ATTR_DIRECTORY
+}
+
+/*
+Get the location for the next free DIR entry in a cluster.
+*/
+func GetNextFreeDIR[T FATSystem](fs T, cluster uint32) (int64, error) {
+	disk_ref := fs.GetDiskRef()
+	current_location, err := disk_ref.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return -1, err
+	}
+
+	cluster_boundary := LookupClusterBytes(fs, (cluster + 1))
+	for current_location < int64(cluster_boundary) {
+		dir, err := ReadDIR(disk_ref)
+		if err != nil {
+			return -1, nil
+		}
+
+		if dir.DIR_name[0] == 0x00 {
+			return current_location, nil
+		}
+
+		current_location, err = disk_ref.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return -1, err
+		}
+	}
+
+	return -1, errors.New("no free space in cluster")
 }

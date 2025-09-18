@@ -1,19 +1,19 @@
-package fat32
+package fat
 
 import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"unicode/utf16"
 
 	"github.com/zni/fslib/internal/utilities"
-	"github.com/zni/fslib/pkg/fat/common"
 )
 
 const last_long_entry uint8 = 0x40
-const long_entry uint8 = (common.DIR_ATTR_READONLY | common.DIR_ATTR_HIDDEN | common.DIR_ATTR_SYSTEM | common.DIR_ATTR_VOLUME_ID)
+const long_entry uint8 = (DIR_ATTR_READONLY | DIR_ATTR_HIDDEN | DIR_ATTR_SYSTEM | DIR_ATTR_VOLUME_ID)
 
 type LDIR struct {
 	ordinal    uint8
@@ -29,55 +29,55 @@ type LDIR struct {
 /*
 Read a single LDIR entry from the volume.
 */
-func readLDIR(fs *FAT32) (*LDIR, error) {
+func ReadLDIR(fs *os.File) (*LDIR, error) {
 	var name_part LDIR
 	var byte_ []uint8 = make([]uint8, 1)
 	var short_ []uint8 = make([]uint8, 2)
 
-	_, err := fs.file.Read(byte_)
+	_, err := fs.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
 	name_part.ordinal = byte_[0]
 
 	name_part.name1 = make([]uint8, 10)
-	_, err = fs.file.Read(name_part.name1)
+	_, err = fs.Read(name_part.name1)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = fs.file.Read(byte_)
+	_, err = fs.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
 	name_part.attr = byte_[0]
 
-	_, err = fs.file.Read(byte_)
+	_, err = fs.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
 	name_part.ltype = byte_[0]
 
-	_, err = fs.file.Read(byte_)
+	_, err = fs.Read(byte_)
 	if err != nil {
 		return nil, err
 	}
 	name_part.chksum = byte_[0]
 
 	name_part.name2 = make([]uint8, 12)
-	_, err = fs.file.Read(name_part.name2)
+	_, err = fs.Read(name_part.name2)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = fs.file.Read(short_)
+	_, err = fs.Read(short_)
 	if err != nil {
 		return nil, err
 	}
 	name_part.cluster_lo = utilities.BytesToShort(short_)
 
 	name_part.name3 = make([]uint8, 4)
-	_, err = fs.file.Read(name_part.name3)
+	_, err = fs.Read(name_part.name3)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func joinLDIRs(ldirs []*LDIR) string {
 /*
 Compute the checksum over the DIR entry used to validate live LDIR entries.
 */
-func computeShortChecksum(dir *common.DIR) uint8 {
+func computeShortChecksum(dir *DIR) uint8 {
 	var chksum uint8 = 0
 	j := 0
 	for i := 11; i != 0; i-- {
@@ -133,7 +133,7 @@ func computeShortChecksum(dir *common.DIR) uint8 {
 /*
 Given a name and checksum, generate the necessary LDIR entries to contain it.
 */
-func createLDIRs(name string, chksum uint8) ([]*LDIR, error) {
+func CreateLDIRs(name string, chksum uint8) ([]*LDIR, error) {
 	if len(name) > 255 {
 		return nil, errors.New("name longer than 255 characters")
 	}
@@ -197,39 +197,39 @@ func createLDIRs(name string, chksum uint8) ([]*LDIR, error) {
 /*
 Write out an array of LDIRs to the location loc on disk.
 */
-func writeLDIRs(fs *FAT32, ldirs []*LDIR, loc int64) (uint32, error) {
-	if _, err := fs.file.Seek(loc, io.SeekStart); err != nil {
+func WriteLDIRs(fs *os.File, ldirs []*LDIR, loc int64) (uint32, error) {
+	if _, err := fs.Seek(loc, io.SeekStart); err != nil {
 		return 0, err
 	}
 
 	for _, ldir := range ldirs {
-		if _, err := fs.file.Write([]byte{ldir.ordinal}); err != nil {
+		if _, err := fs.Write([]byte{ldir.ordinal}); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write(ldir.name1); err != nil {
+		if _, err := fs.Write(ldir.name1); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write([]byte{ldir.attr}); err != nil {
+		if _, err := fs.Write([]byte{ldir.attr}); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write([]byte{ldir.ltype}); err != nil {
+		if _, err := fs.Write([]byte{ldir.ltype}); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write([]byte{ldir.chksum}); err != nil {
+		if _, err := fs.Write([]byte{ldir.chksum}); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write(ldir.name2); err != nil {
+		if _, err := fs.Write(ldir.name2); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write(utilities.ShortToBytes(ldir.cluster_lo)); err != nil {
+		if _, err := fs.Write(utilities.ShortToBytes(ldir.cluster_lo)); err != nil {
 			return 0, err
 		}
-		if _, err := fs.file.Write(ldir.name3); err != nil {
+		if _, err := fs.Write(ldir.name3); err != nil {
 			return 0, err
 		}
 	}
 
-	ldir_end_loc, err := fs.file.Seek(0, io.SeekCurrent)
+	ldir_end_loc, err := fs.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}

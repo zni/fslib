@@ -1,4 +1,4 @@
-package fat32
+package fat
 
 import (
 	"errors"
@@ -6,15 +6,31 @@ import (
 	"os"
 
 	"github.com/zni/fslib/internal/utilities"
-	"github.com/zni/fslib/pkg/fat/common"
 )
 
-type BPB32 struct {
-	Common   *common.BPB
-	Extended *ExtBPB32
+type BPB12 BPB[ExtBPBMinimal]
+
+type ExtBPBMinimal struct {
+	bs_drvnum     byte
+	bs_reserved1  byte
+	bs_bootsig    byte
+	bs_volid      uint32
+	bs_vollab     [11]byte
+	bs_filsystype [8]byte
+
+	// Padded for 448 bytes with value 0x00
+
+	signature_word [2]byte
+
+	// Pad out sector with 0x00
+	// Only for media where bpb_bytspersec > 512
 }
 
-type ExtBPB32 struct {
+type BPB16 BPB[ExtBPBMinimal]
+
+type BPB32 BPB[ExtBPBFull]
+
+type ExtBPBFull struct {
 	BPB_fatsz32   uint32
 	BPB_extflags  uint16
 	BPB_fsver     uint16
@@ -34,8 +50,8 @@ type ExtBPB32 struct {
 	signature_word [2]byte
 }
 
-func readBPB(f *os.File) (*BPB32, error) {
-	var bpb, err = common.ReadCommonBPB(f)
+func ReadBPB32(f *os.File) (*BPB32, error) {
+	var bpb, err = ReadCommonBPB(f)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +60,7 @@ func readBPB(f *os.File) (*BPB32, error) {
 	byte_ := make([]byte, 1)
 	int_ := make([]byte, 4)
 
-	var extbpb ExtBPB32 = ExtBPB32{}
+	var extbpb ExtBPBFull = ExtBPBFull{}
 	_, err = f.Read(int_)
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-package common
+package fat
 
 import (
 	"errors"
@@ -109,7 +109,7 @@ func writeFAT32(fs *os.File, table []uint32) error {
 	return nil
 }
 
-func SeekToFAT(fs *os.File, bpb *BPB) error {
+func SeekToFAT(fs *os.File, bpb *CommonBPB) error {
 	var fat_loc int64 = int64(bpb.BPB_rsvdseccnt) * int64(bpb.BPB_bytspersec)
 	if _, err := fs.Seek(fat_loc, io.SeekStart); err != nil {
 		return err

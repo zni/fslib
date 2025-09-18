@@ -1,4 +1,4 @@
-package common
+package fat
 
 import (
 	"io"
@@ -7,7 +7,12 @@ import (
 	"github.com/zni/fslib/internal/utilities"
 )
 
-type BPB struct {
+type BPB[T any] struct {
+	Common   *CommonBPB
+	Extended *T
+}
+
+type CommonBPB struct {
 	BS_jmpboot [3]byte
 	BS_oemname [8]byte
 
@@ -25,8 +30,8 @@ type BPB struct {
 	BPB_totsec32   uint32
 }
 
-func ReadCommonBPB(f *os.File) (*BPB, error) {
-	var bpb BPB = BPB{}
+func ReadCommonBPB(f *os.File) (*CommonBPB, error) {
+	var bpb CommonBPB = CommonBPB{}
 	short_ := make([]byte, 2)
 	byte_ := make([]byte, 1)
 	int_ := make([]byte, 4)

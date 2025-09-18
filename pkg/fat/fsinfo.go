@@ -1,4 +1,4 @@
-package fat32
+package fat
 
 import (
 	"errors"
@@ -20,106 +20,105 @@ type FSInfo struct {
 	trail_sig  uint32
 }
 
-func readFSInfo(f *os.File) (*FSInfo, error) {
-	var fsinfo FSInfo
+func (fsinfo *FSInfo) Read(f *os.File) error {
 	int_ := make([]uint8, 4)
 
 	_, err := f.Read(int_)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fsinfo.lead_sig = utilities.BytesToInt(int_)
 	if fsinfo.lead_sig != lead_signature {
-		return nil, errors.New(`invalid lead signature`)
+		return errors.New(`invalid lead signature`)
 	}
 
 	_, err = f.Seek(480, io.SeekCurrent)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	_, err = f.Read(int_)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fsinfo.struc_sig = utilities.BytesToInt(int_)
 	if fsinfo.struc_sig != structure_signature {
-		return nil, errors.New(`invalid structure signature`)
+		return errors.New(`invalid structure signature`)
 	}
 
 	_, err = f.Read(int_)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fsinfo.free_count = utilities.BytesToInt(int_)
 
 	_, err = f.Read(int_)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fsinfo.next_free = utilities.BytesToInt(int_)
 
 	_, err = f.Seek(12, io.SeekCurrent)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	_, err = f.Read(int_)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	fsinfo.trail_sig = utilities.BytesToInt(int_)
 	if fsinfo.trail_sig != trailing_signature {
-		return nil, errors.New(`invalid trailing signature`)
+		return errors.New(`invalid trailing signature`)
 	}
 
-	return &fsinfo, nil
+	return nil
 }
 
-func seekToFSInfo(fs *FAT32) error {
-	if _, err := fs.file.Seek(int64(fs.BPB.Common.BPB_bytspersec), io.SeekStart); err != nil {
+func seekToFSInfo(fs *os.File, bpb *CommonBPB) error {
+	if _, err := fs.Seek(int64(bpb.BPB_bytspersec), io.SeekStart); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func writeFSInfo(fs *FAT32) error {
-	if err := seekToFSInfo(fs); err != nil {
+func (fsinfo *FSInfo) Write(fs *os.File, bpb *CommonBPB) error {
+	if err := seekToFSInfo(fs, bpb); err != nil {
 		return err
 	}
 
-	_, err := fs.file.Write(utilities.IntToBytes(fs.FSInfo.lead_sig))
+	_, err := fs.Write(utilities.IntToBytes(fsinfo.lead_sig))
 	if err != nil {
 		return err
 	}
 
-	_, err = fs.file.Seek(480, io.SeekCurrent)
+	_, err = fs.Seek(480, io.SeekCurrent)
 	if err != nil {
 		return err
 	}
 
-	_, err = fs.file.Write(utilities.IntToBytes(fs.FSInfo.struc_sig))
+	_, err = fs.Write(utilities.IntToBytes(fsinfo.struc_sig))
 	if err != nil {
 		return err
 	}
 
-	_, err = fs.file.Write(utilities.IntToBytes(fs.FSInfo.free_count))
+	_, err = fs.Write(utilities.IntToBytes(fsinfo.free_count))
 	if err != nil {
 		return err
 	}
 
-	_, err = fs.file.Write(utilities.IntToBytes(fs.FSInfo.next_free))
+	_, err = fs.Write(utilities.IntToBytes(fsinfo.next_free))
 	if err != nil {
 		return err
 	}
 
-	_, err = fs.file.Seek(12, io.SeekCurrent)
+	_, err = fs.Seek(12, io.SeekCurrent)
 	if err != nil {
 		return err
 	}
 
-	_, err = fs.file.Write(utilities.IntToBytes(fs.FSInfo.trail_sig))
+	_, err = fs.Write(utilities.IntToBytes(fsinfo.trail_sig))
 	if err != nil {
 		return err
 	}
